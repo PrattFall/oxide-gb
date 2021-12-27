@@ -86,24 +86,20 @@ pub struct RamSpec {
 
 fn read_ram_size(buffer: &[u8]) -> Option<RamSpec> {
     match buffer[RAM_SIZE_LOCATION] {
-        0x01 => Some(RamSpec {
-            size: 2000,
-            banks: 1,
-        }),
         0x02 => Some(RamSpec {
-            size: 8000,
+            size: 0x8000,
             banks: 1,
         }),
         0x03 => Some(RamSpec {
-            size: 8000,
+            size: 0x8000,
             banks: 4,
         }),
         0x04 => Some(RamSpec {
-            size: 8000,
+            size: 0x8000,
             banks: 16,
         }),
         0x05 => Some(RamSpec {
-            size: 8000,
+            size: 0x8000,
             banks: 8,
         }),
         _ => None,

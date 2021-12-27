@@ -1,3 +1,5 @@
+use crate::flag_register::{FlagRegister, FlagRegisterValue};
+use crate::memory::MemoryBankController;
 use std::collections::HashMap;
 use std::num::Wrapping;
 
@@ -9,49 +11,6 @@ fn add_should_half_carry(a: u8, b: u8) -> bool {
 
 fn sub_should_half_carry(a: u8, b: u8) -> bool {
     (a & 0xf) < (b & 0xf)
-}
-
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
-pub enum FlagRegisterValue {
-    C,
-    H,
-    N,
-    Z,
-    NZ,
-    NC,
-}
-
-impl FlagRegisterValue {
-    fn to_u8(&self) -> u8 {
-        match self {
-            FlagRegisterValue::C => (1 << 4),
-            FlagRegisterValue::H => (1 << 5),
-            FlagRegisterValue::N => (1 << 6),
-            FlagRegisterValue::Z => (1 << 7),
-            FlagRegisterValue::NZ => FlagRegisterValue::N.to_u8() | FlagRegisterValue::Z.to_u8(),
-            FlagRegisterValue::NC => FlagRegisterValue::N.to_u8() | FlagRegisterValue::C.to_u8(),
-        }
-    }
-}
-
-pub trait FlagRegister<T> {
-    fn contains_flag(&self, flag: T) -> bool;
-    fn set_flag(&self, flag: T) -> Self;
-    fn unset_flag(&self, flag: T) -> Self;
-}
-
-impl FlagRegister<FlagRegisterValue> for u8 {
-    fn contains_flag(&self, flag: FlagRegisterValue) -> bool {
-        self & flag.to_u8() == flag.to_u8()
-    }
-
-    fn set_flag(&self, flag: FlagRegisterValue) -> Self {
-        self | flag.to_u8()
-    }
-
-    fn unset_flag(&self, flag: FlagRegisterValue) -> Self {
-        self & !flag.to_u8()
-    }
 }
 
 #[derive(Hash, PartialEq, Eq, Debug, Clone, Copy)]
@@ -116,7 +75,7 @@ impl SharpSM83 {
 
     fn set_register_from_memory(
         &mut self,
-        memory: &mut Vec<u8>,
+        memory: &Option<MemoryBankController>,
         register: GeneralRegister,
         location: u16,
     ) {
@@ -245,7 +204,7 @@ impl SharpSM83 {
         self.get_register(GeneralRegister::F).contains_flag(flag)
     }
 
-    fn call(&mut self, cartridge: &Vec<u8>, memory: &mut Vec<u8>) {
+    fn call(&mut self, cartridge: &Vec<u8>, memory: &mut Option<MemoryBankController>) {
         let call_location = self.get_next_u16(cartridge);
         let [left, right] = u16_to_u8s(self.program_counter);
 
@@ -520,7 +479,7 @@ impl SharpSM83 {
         self.program_counter += 3;
     }
 
-    fn ld_to_hl(&mut self, memory: &mut Vec<u8>, register: GeneralRegister) {
+    fn ld_to_hl(&mut self, memory: &mut Option<MemoryBankController>, register: GeneralRegister) {
         if self.debug {
             println!(
                 "{:#06x}: Loading {:#04x} from Register {:?} to (HL)",
@@ -543,15 +502,18 @@ impl SharpSM83 {
         self.program_counter += 1;
     }
 
-    fn set_memory(&mut self, memory: &mut Vec<u8>, location: u16, value: u8) {
-        memory[usize::from(location)] = value;
+    fn set_memory(&mut self, memory: &mut Option<MemoryBankController>, location: u16, value: u8) {
+        memory.as_mut().map(|x| x.set_byte(location, value));
     }
 
-    fn get_memory(&mut self, memory: &mut Vec<u8>, location: u16) -> u8 {
-        memory[usize::from(location)]
+    fn get_memory(&mut self, memory: &Option<MemoryBankController>, location: u16) -> u8 {
+        memory
+            .as_ref()
+            .map(|x| x.get_byte(location))
+            .unwrap_or(0x00)
     }
 
-    fn set_hl_in_memory(&mut self, memory: &mut Vec<u8>, value: u8) {
+    fn set_hl_in_memory(&mut self, memory: &mut Option<MemoryBankController>, value: u8) {
         self.set_memory(
             memory,
             self.get_combined_register(CombinedRegister::HL),
@@ -559,11 +521,11 @@ impl SharpSM83 {
         );
     }
 
-    fn get_hl_from_memory(&mut self, memory: &mut Vec<u8>) -> u8 {
+    fn get_hl_from_memory(&mut self, memory: &Option<MemoryBankController>) -> u8 {
         self.get_memory(memory, self.get_combined_register(CombinedRegister::HL))
     }
 
-    pub fn apply_operation(&mut self, op: &u8, cartridge: &Vec<u8>, memory: &mut Vec<u8>) {
+    fn display_current_registers(&self, op: u8) {
         println!(
             "{:#06x}: {:#04x}, A {}, B {}, C {}, D {}, E {}, F {}, H {}, L {}",
             self.program_counter,
@@ -577,6 +539,18 @@ impl SharpSM83 {
             self.get_register(GeneralRegister::H),
             self.get_register(GeneralRegister::L),
         );
+    }
+
+    pub fn apply_operation(
+        &mut self,
+        cartridge: &Vec<u8>,
+        memory: &mut Option<MemoryBankController>,
+    ) {
+        let op = cartridge[usize::from(self.program_counter)];
+
+        if self.debug {
+            self.display_current_registers(op);
+        }
 
         match op {
             0x00 => {
