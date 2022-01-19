@@ -2,6 +2,7 @@ use std::ascii;
 use std::str;
 
 use crate::cartridge_type::CartridgeType;
+use crate::memory::MemoryBank;
 
 // const NINTENDO_LOGO_LOCATION: usize = 0x104;
 // const NINTENDO_LOGO_END: usize = 0x133;
@@ -15,10 +16,10 @@ const SGB_FLAG_LOCATION: usize = 0x146;
 const ROM_SIZE_LOCATION: usize = 0x148;
 const RAM_SIZE_LOCATION: usize = 0x149;
 
-fn buffer_slice_to_string(buffer: &[u8]) -> String {
+fn buffer_slice_to_string(buffer: MemoryBank) -> String {
     let mut visible = String::new();
 
-    for &b in buffer {
+    for b in buffer {
         let part: Vec<u8> = ascii::escape_default(b).collect();
         visible.push_str(str::from_utf8(&part).unwrap());
     }
@@ -46,7 +47,7 @@ pub enum DestinationCode {
     NonJapanese,
 }
 
-fn read_cgb_flag(buffer: &[u8]) -> ColorGameboySupport {
+fn read_cgb_flag(buffer: Vec<u8>) -> ColorGameboySupport {
     match buffer[CGB_FLAG_LOCATION] {
         0x80 => ColorGameboySupport::Both,
         0xC0 => ColorGameboySupport::OnlyColor,
@@ -54,7 +55,7 @@ fn read_cgb_flag(buffer: &[u8]) -> ColorGameboySupport {
     }
 }
 
-fn read_sgb_flag(buffer: &[u8]) -> SuperGameboySupport {
+fn read_sgb_flag(buffer: Vec<u8>) -> SuperGameboySupport {
     match buffer[SGB_FLAG_LOCATION] {
         0x03 => SuperGameboySupport::Support,
         _ => SuperGameboySupport::NoSupport,

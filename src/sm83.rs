@@ -1,5 +1,5 @@
 use crate::flag_register::{FlagRegister, FlagRegisterValue};
-use crate::memory::MemoryBankController;
+use crate::memory::MemoryMap;
 use std::collections::HashMap;
 use std::num::Wrapping;
 
@@ -75,11 +75,11 @@ impl SharpSM83 {
 
     fn set_register_from_memory(
         &mut self,
-        memory: &Option<MemoryBankController>,
+        memory: &mut MemoryMap,
         register: GeneralRegister,
         location: u16,
     ) {
-        let value = self.get_memory(memory, location);
+        let value = memory.get_value(usize::from(location));
 
         if self.debug {
             println!(
@@ -204,13 +204,13 @@ impl SharpSM83 {
         self.get_register(GeneralRegister::F).contains_flag(flag)
     }
 
-    fn call(&mut self, cartridge: &Vec<u8>, memory: &mut Option<MemoryBankController>) {
+    fn call(&mut self, cartridge: &Vec<u8>, memory: &mut MemoryMap) {
         let call_location = self.get_next_u16(cartridge);
         let [left, right] = u16_to_u8s(self.program_counter);
 
         self.stack_pointer -= 2;
-        self.set_memory(memory, self.stack_pointer, left);
-        self.set_memory(memory, self.stack_pointer + 1, right);
+        memory.set_value(usize::from(self.stack_pointer), left);
+        memory.set_value(usize::from(self.stack_pointer + 1), right);
         self.program_counter = call_location;
     }
 
@@ -243,20 +243,19 @@ impl SharpSM83 {
 
     fn jp(&mut self, cartridge: &Vec<u8>, flag: Option<FlagRegisterValue>) {
         match flag {
+            Some(f) if self.is_flag_set(f) => {
+                self.jp_inner(cartridge);
+            }
             Some(f) => {
-                if self.is_flag_set(f) {
-                    self.jp_inner(cartridge);
-                } else {
-                    if self.debug {
-                        println!(
-                            "Flag {:?} not set. Found {:#06x}",
-                            f,
-                            self.get_register(GeneralRegister::F)
-                        );
-                    }
-
-                    self.program_counter += 1;
+                if self.debug {
+                    println!(
+                        "Flag {:?} not set. Found {:#06x}",
+                        f,
+                        self.get_register(GeneralRegister::F)
+                    );
                 }
+
+                self.program_counter += 1;
             }
             None => {
                 self.jp_inner(cartridge);
@@ -282,20 +281,19 @@ impl SharpSM83 {
 
     fn jr(&mut self, cartridge: &Vec<u8>, flag: Option<FlagRegisterValue>) {
         match flag {
+            Some(f) if self.is_flag_set(f) => {
+                self.jr_inner(cartridge);
+            }
             Some(f) => {
-                if self.is_flag_set(f) {
-                    self.jr_inner(cartridge);
-                } else {
-                    if self.debug {
-                        println!(
-                            "Flag {:?} not set. Found {:#06x}",
-                            f,
-                            self.get_register(GeneralRegister::F)
-                        );
-                    }
-
-                    self.program_counter += 1;
+                if self.debug {
+                    println!(
+                        "Flag {:?} not set. Found {:#06x}",
+                        f,
+                        self.get_register(GeneralRegister::F)
+                    );
                 }
+
+                self.program_counter += 1;
             }
             None => {
                 self.jr_inner(cartridge);
@@ -326,11 +324,7 @@ impl SharpSM83 {
 
         let register_value = self.get_register(register);
 
-        if register_value == 0x00 {
-            self.set_register(register, 0xFF);
-        } else {
-            self.set_register(register, register_value - 1);
-        }
+        self.set_register(register, register_value.wrapping_sub(1));
 
         if self.debug {
             println!(
@@ -479,7 +473,7 @@ impl SharpSM83 {
         self.program_counter += 3;
     }
 
-    fn ld_to_hl(&mut self, memory: &mut Option<MemoryBankController>, register: GeneralRegister) {
+    fn ld_to_hl(&mut self, memory: &mut MemoryMap, register: GeneralRegister) {
         if self.debug {
             println!(
                 "{:#06x}: Loading {:#04x} from Register {:?} to (HL)",
@@ -502,27 +496,17 @@ impl SharpSM83 {
         self.program_counter += 1;
     }
 
-    fn set_memory(&mut self, memory: &mut Option<MemoryBankController>, location: u16, value: u8) {
-        memory.as_mut().map(|x| x.set_byte(location, value));
-    }
-
-    fn get_memory(&mut self, memory: &Option<MemoryBankController>, location: u16) -> u8 {
-        memory
-            .as_ref()
-            .map(|x| x.get_byte(location))
-            .unwrap_or(0x00)
-    }
-
-    fn set_hl_in_memory(&mut self, memory: &mut Option<MemoryBankController>, value: u8) {
-        self.set_memory(
-            memory,
-            self.get_combined_register(CombinedRegister::HL),
+    fn set_hl_in_memory(&mut self, memory: &mut MemoryMap, value: u8) {
+        memory.set_value(
+            usize::from(self.get_combined_register(CombinedRegister::HL)),
             value,
         );
     }
 
-    fn get_hl_from_memory(&mut self, memory: &Option<MemoryBankController>) -> u8 {
-        self.get_memory(memory, self.get_combined_register(CombinedRegister::HL))
+    fn get_hl_from_memory(&mut self, memory: &MemoryMap) -> u8 {
+        memory.get_value(usize::from(
+            self.get_combined_register(CombinedRegister::HL),
+        ))
     }
 
     fn display_current_registers(&self, op: u8) {
@@ -541,11 +525,7 @@ impl SharpSM83 {
         );
     }
 
-    pub fn apply_operation(
-        &mut self,
-        cartridge: &Vec<u8>,
-        memory: &mut Option<MemoryBankController>,
-    ) {
+    pub fn apply_operation(&mut self, cartridge: &Vec<u8>, memory: &mut MemoryMap) {
         let op = cartridge[usize::from(self.program_counter)];
 
         if self.debug {
@@ -560,9 +540,8 @@ impl SharpSM83 {
                 self.ld_next_16(cartridge, CombinedRegister::BC);
             }
             0x02 => {
-                self.set_memory(
-                    memory,
-                    self.get_combined_register(CombinedRegister::BC),
+                memory.set_value(
+                    usize::from(self.get_combined_register(CombinedRegister::BC)),
                     self.get_register(GeneralRegister::A),
                 );
 

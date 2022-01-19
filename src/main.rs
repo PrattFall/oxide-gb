@@ -11,7 +11,7 @@
 // - Resolution: 160x144
 // - 4 shades of grey
 
-use crate::memory::MemoryBankController;
+use crate::memory::MemoryMap;
 use std::fs::File;
 use std::io;
 use std::io::prelude::*;
@@ -21,6 +21,7 @@ mod cartridge_header;
 mod cartridge_type;
 mod flag_register;
 mod memory;
+mod memory_bank_controller;
 mod sm83;
 
 use crate::cartridge_header::CartridgeHeader;
