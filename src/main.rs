@@ -24,14 +24,6 @@ mod sm83;
 
 use memory_bank_controller::make_controller;
 
-// struct PPU {}
-// struct LCD {}
-// struct Tile {}
-// struct Background {}
-// struct Window {}
-// struct Sprite {}
-// struct APU {}
-
 fn main() -> io::Result<()> {
     let f = File::open("test_games/test.gb")?;
     let mut reader = BufReader::new(f);
@@ -47,12 +39,7 @@ fn main() -> io::Result<()> {
     cpu.debug = true;
 
     loop {
-        cpu.apply_operation(&cartridge_buffer, &mut memory);
-
-        if cpu.program_counter >= 0x7ff0 {
-            //arbitrary breaking point
-            break;
-        }
+        cpu.apply_operation(&mut memory);
     }
 
     Ok(())

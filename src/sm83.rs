@@ -69,13 +69,21 @@ impl SharpSM83 {
         }
     }
 
+    fn not_implemented(&mut self, message: &str) {
+        if self.debug {
+            println!("TODO: {}", message);
+        }
+
+        self.program_counter += 1;
+    }
+
     fn set_register(&mut self, register: GeneralRegister, value: u8) {
         self.registers.insert(register, value);
     }
 
     fn set_register_from_memory(
         &mut self,
-        memory: &mut MemoryBankController,
+        memory: &mut dyn MemoryBankController,
         register: GeneralRegister,
         location: u16,
     ) {
@@ -204,11 +212,11 @@ impl SharpSM83 {
         self.get_register(GeneralRegister::F).contains_flag(flag)
     }
 
-    fn call(&mut self, cartridge: &Vec<u8>, memory: &mut MemoryBankController) {
-        let call_location = self.get_next_u16(cartridge);
+    fn call(&mut self, memory: &mut dyn MemoryBankController) {
+        let call_location = self.get_next_u16(memory);
         let [left, right] = u16_to_u8s(self.program_counter);
 
-        self.stack_pointer -= 2;
+        self.stack_pointer = self.stack_pointer.wrapping_sub(2);
         memory.write_memory(usize::from(self.stack_pointer), left);
         memory.write_memory(usize::from(self.stack_pointer + 1), right);
         self.program_counter = call_location;
@@ -228,8 +236,8 @@ impl SharpSM83 {
         self.program_counter += 1;
     }
 
-    fn jp_inner(&mut self, cartridge: &Vec<u8>) {
-        let jump_location = self.get_next_u16(cartridge);
+    fn jp_inner(&mut self, memory: &dyn MemoryBankController) {
+        let jump_location = self.get_next_u16(memory);
 
         if self.debug {
             println!(
@@ -241,10 +249,10 @@ impl SharpSM83 {
         self.program_counter = jump_location;
     }
 
-    fn jp(&mut self, cartridge: &Vec<u8>, flag: Option<FlagRegisterValue>) {
+    fn jp(&mut self, memory: &dyn MemoryBankController, flag: Option<FlagRegisterValue>) {
         match flag {
             Some(f) if self.is_flag_set(f) => {
-                self.jp_inner(cartridge);
+                self.jp_inner(memory);
             }
             Some(f) => {
                 if self.debug {
@@ -258,14 +266,14 @@ impl SharpSM83 {
                 self.program_counter += 1;
             }
             None => {
-                self.jp_inner(cartridge);
+                self.jp_inner(memory);
             }
         }
     }
 
-    fn jr_inner(&mut self, cartridge: &Vec<u8>) {
+    fn jr_inner(&mut self, memory: &dyn MemoryBankController) {
         // Jump to program_counter + u8
-        let relative_location = u16::from(self.get_next_u8(cartridge));
+        let relative_location = u16::from(self.get_next_u8(memory));
 
         if self.debug {
             println!(
@@ -279,10 +287,10 @@ impl SharpSM83 {
         self.program_counter += relative_location;
     }
 
-    fn jr(&mut self, cartridge: &Vec<u8>, flag: Option<FlagRegisterValue>) {
+    fn jr(&mut self, memory: &dyn MemoryBankController, flag: Option<FlagRegisterValue>) {
         match flag {
             Some(f) if self.is_flag_set(f) => {
-                self.jr_inner(cartridge);
+                self.jr_inner(memory);
             }
             Some(f) => {
                 if self.debug {
@@ -296,7 +304,7 @@ impl SharpSM83 {
                 self.program_counter += 1;
             }
             None => {
-                self.jr_inner(cartridge);
+                self.jr_inner(memory);
             }
         }
     }
@@ -358,10 +366,7 @@ impl SharpSM83 {
             self.set_register(GeneralRegister::A, r_val.wrapping_add(a_val));
             self.set_flag(FlagRegisterValue::C);
         } else {
-            self.set_register(
-                GeneralRegister::A,
-                self.get_register(GeneralRegister::A) - self.get_register(register),
-            );
+            self.set_register(GeneralRegister::A, a_val.wrapping_sub(r_val));
         }
 
         if sub_should_half_carry(a_val, self.get_register(GeneralRegister::A)) {
@@ -395,10 +400,7 @@ impl SharpSM83 {
             self.set_register(GeneralRegister::A, a_val.wrapping_sub(r_val));
             self.set_flag(FlagRegisterValue::C);
         } else {
-            self.set_register(
-                GeneralRegister::A,
-                self.get_register(GeneralRegister::A) - self.get_register(register),
-            );
+            self.set_register(GeneralRegister::A, a_val.wrapping_sub(r_val));
         }
 
         if sub_should_half_carry(a_val, self.get_register(GeneralRegister::A)) {
@@ -412,19 +414,19 @@ impl SharpSM83 {
         self.program_counter += 1;
     }
 
-    fn get_next_u8(&mut self, cartridge: &Vec<u8>) -> u8 {
-        cartridge[usize::from(self.program_counter + 1)]
+    fn get_next_u8(&mut self, memory: &dyn MemoryBankController) -> u8 {
+        memory.read_memory(usize::from(self.program_counter + 1))
     }
 
-    fn get_next_u16(&mut self, cartridge: &Vec<u8>) -> u16 {
+    fn get_next_u16(&mut self, memory: &dyn MemoryBankController) -> u16 {
         u8s_to_u16(
-            cartridge[usize::from(self.program_counter + 1)],
-            cartridge[usize::from(self.program_counter + 2)],
+            memory.read_memory(usize::from(self.program_counter + 1)),
+            memory.read_memory(usize::from(self.program_counter + 2)),
         )
     }
 
-    fn ld_next_8(&mut self, cartridge: &Vec<u8>, register: GeneralRegister) {
-        let loaded_value = self.get_next_u8(cartridge);
+    fn ld_next_8(&mut self, memory: &dyn MemoryBankController, register: GeneralRegister) {
+        let loaded_value = self.get_next_u8(memory);
 
         self.set_register(register, loaded_value);
 
@@ -438,28 +440,23 @@ impl SharpSM83 {
         self.program_counter += 2;
     }
 
-    fn ld_next_16(&mut self, cartridge: &Vec<u8>, register: CombinedRegister) {
-        let loaded_value = self.get_next_u16(cartridge);
+    fn ld_next_16(&mut self, memory: &dyn MemoryBankController, register: CombinedRegister) {
+        let loaded_value = self.get_next_u16(memory);
 
         self.set_combined_register(register, loaded_value);
 
         if self.debug {
             println!(
-                "{:#04x}: Loading {:#06x} to Register DE",
-                self.program_counter, loaded_value
-            );
-            println!(
-                "    D: {:#04x} | E: {:#04x}",
-                self.get_register(GeneralRegister::D),
-                self.get_register(GeneralRegister::E)
+                "{:#04x}: Loading {:#06x} to Register {:?}",
+                self.program_counter, loaded_value, register
             );
         }
 
         self.program_counter += 3;
     }
 
-    fn ld_to_stack_pointer(&mut self, cartridge: &Vec<u8>) {
-        let loaded_value = self.get_next_u16(cartridge);
+    fn ld_to_stack_pointer(&mut self, memory: &dyn MemoryBankController) {
+        let loaded_value = self.get_next_u16(memory);
 
         if self.debug {
             println!(
@@ -473,7 +470,7 @@ impl SharpSM83 {
         self.program_counter += 3;
     }
 
-    fn ld_to_hl(&mut self, memory: &mut MemoryBankController, register: GeneralRegister) {
+    fn ld_to_hl(&mut self, memory: &mut dyn MemoryBankController, register: GeneralRegister) {
         if self.debug {
             println!(
                 "{:#06x}: Loading {:#04x} from Register {:?} to (HL)",
@@ -496,14 +493,14 @@ impl SharpSM83 {
         self.program_counter += 1;
     }
 
-    fn set_hl_in_memory(&mut self, memory: &mut MemoryBankController, value: u8) {
+    fn set_hl_in_memory(&mut self, memory: &mut dyn MemoryBankController, value: u8) {
         memory.write_memory(
             usize::from(self.get_combined_register(CombinedRegister::HL)),
             value,
         );
     }
 
-    fn get_hl_from_memory(&mut self, memory: &MemoryBankController) -> u8 {
+    fn get_hl_from_memory(&mut self, memory: &dyn MemoryBankController) -> u8 {
         memory.read_memory(usize::from(
             self.get_combined_register(CombinedRegister::HL),
         ))
@@ -511,7 +508,7 @@ impl SharpSM83 {
 
     fn display_current_registers(&self, op: u8) {
         println!(
-            "{:#06x}: {:#04x}, A {}, B {}, C {}, D {}, E {}, F {}, H {}, L {}",
+            "{:#06x}: {:#04x}, A {:#04x}, B {:#04x}, C {:#04x}, D {:#04x}, E {:#04x}, F {:#04x}, H {:#04x}, L {:#04x}",
             self.program_counter,
             op,
             self.get_register(GeneralRegister::A),
@@ -525,8 +522,8 @@ impl SharpSM83 {
         );
     }
 
-    pub fn apply_operation(&mut self, cartridge: &Vec<u8>, memory: &mut MemoryBankController) {
-        let op = cartridge[usize::from(self.program_counter)];
+    pub fn apply_operation(&mut self, memory: &mut dyn MemoryBankController) {
+        let op = memory.read_memory(usize::from(self.program_counter));
 
         if self.debug {
             self.display_current_registers(op);
@@ -537,7 +534,7 @@ impl SharpSM83 {
                 self.nop();
             }
             0x01 => {
-                self.ld_next_16(cartridge, CombinedRegister::BC);
+                self.ld_next_16(memory, CombinedRegister::BC);
             }
             0x02 => {
                 memory.write_memory(
@@ -557,7 +554,22 @@ impl SharpSM83 {
                 self.dec(GeneralRegister::B);
             }
             0x06 => {
-                self.ld_next_8(cartridge, GeneralRegister::B);
+                self.ld_next_8(memory, GeneralRegister::B);
+            }
+            0x07 => {
+                self.not_implemented("RLCA");
+            }
+            0x08 => {
+                self.not_implemented("LD (u16), Stack Pointer");
+            }
+            0x09 => {
+                self.not_implemented("ADD HL, BC");
+            }
+            0x0A => {
+                self.not_implemented("TODO: ADD HL, BC");
+            }
+            0x0B => {
+                self.not_implemented("LD A, (BC)");
             }
             0x0C => {
                 self.inc(GeneralRegister::C);
@@ -566,14 +578,18 @@ impl SharpSM83 {
                 self.dec(GeneralRegister::C);
             }
             0x0E => {
-                self.ld_next_8(cartridge, GeneralRegister::C);
+                self.ld_next_8(memory, GeneralRegister::C);
+            }
+            0x0F => {
+                self.not_implemented("RRCA");
             }
             0x10 => {
-                println!("TODO: STOP");
+                self.not_implemented("STOP");
             }
             0x11 => {
-                self.ld_next_16(cartridge, CombinedRegister::DE);
+                self.ld_next_16(memory, CombinedRegister::DE);
             }
+            0x12 => self.not_implemented("LD (DE), A"),
             0x13 => {
                 self.inc16(CombinedRegister::DE);
             }
@@ -584,11 +600,15 @@ impl SharpSM83 {
                 self.dec(GeneralRegister::D);
             }
             0x16 => {
-                self.ld_next_8(cartridge, GeneralRegister::D);
+                self.ld_next_8(memory, GeneralRegister::D);
             }
+            0x17 => self.not_implemented("RLA"),
             0x18 => {
-                self.jr(cartridge, None);
+                self.jr(memory, None);
             }
+            0x19 => self.not_implemented("ADD HL, DE"),
+            0x1A => self.not_implemented("LD A, (DE)"),
+            0x1B => self.not_implemented("DEC DE"),
             0x1C => {
                 self.inc(GeneralRegister::E);
             }
@@ -596,14 +616,16 @@ impl SharpSM83 {
                 self.dec(GeneralRegister::E);
             }
             0x1E => {
-                self.ld_next_8(cartridge, GeneralRegister::E);
+                self.ld_next_8(memory, GeneralRegister::E);
             }
+            0x1F => self.not_implemented("RRA"),
             0x20 => {
-                self.jr(cartridge, Some(FlagRegisterValue::NZ));
+                self.jr(memory, Some(FlagRegisterValue::NZ));
             }
             0x21 => {
-                self.ld_next_16(cartridge, CombinedRegister::HL);
+                self.ld_next_16(memory, CombinedRegister::HL);
             }
+            0x22 => self.not_implemented("LD (HL+), A"),
             0x23 => {
                 self.inc16(CombinedRegister::HL);
             }
@@ -613,9 +635,14 @@ impl SharpSM83 {
             0x25 => {
                 self.dec(GeneralRegister::H);
             }
+            0x26 => self.not_implemented("DAA"),
+            0x27 => self.not_implemented("JR Z, u8"),
             0x28 => {
-                self.jr(cartridge, Some(FlagRegisterValue::Z));
+                self.jr(memory, Some(FlagRegisterValue::Z));
             }
+            0x29 => self.not_implemented("ADD HL, HL"),
+            0x2A => self.not_implemented("LD A, (HL+)"),
+            0x2B => self.not_implemented("DEC HL"),
             0x2C => {
                 self.inc(GeneralRegister::L);
             }
@@ -623,20 +650,29 @@ impl SharpSM83 {
                 self.dec(GeneralRegister::L);
             }
             0x2E => {
-                self.ld_next_8(cartridge, GeneralRegister::L);
+                self.ld_next_8(memory, GeneralRegister::L);
             }
             0x2F => {
                 self.cpl();
             }
             0x30 => {
-                self.jr(cartridge, Some(FlagRegisterValue::NC));
+                self.jr(memory, Some(FlagRegisterValue::NC));
             }
             0x31 => {
-                self.ld_to_stack_pointer(cartridge);
+                self.ld_to_stack_pointer(memory);
             }
+            0x32 => self.not_implemented("LD (HL-), A"),
+            0x33 => self.not_implemented("INC SP"),
+            0x34 => self.not_implemented("INC (HL) 1"),
+            0x35 => self.not_implemented("DEC (HL) 1"),
+            0x36 => self.not_implemented("LD (HL), u8"),
+            0x37 => self.not_implemented("SCF"),
             0x38 => {
-                self.jr(cartridge, Some(FlagRegisterValue::C));
+                self.jr(memory, Some(FlagRegisterValue::C));
             }
+            0x39 => self.not_implemented("ADD HL, SP"),
+            0x3A => self.not_implemented("LD A, (HL-)"),
+            0x3B => self.not_implemented("DEC SP"),
             0x3C => {
                 self.inc(GeneralRegister::A);
             }
@@ -644,8 +680,9 @@ impl SharpSM83 {
                 self.dec(GeneralRegister::A);
             }
             0x3E => {
-                self.ld_next_8(cartridge, GeneralRegister::A);
+                self.ld_next_8(memory, GeneralRegister::A);
             }
+            0x3F => self.not_implemented("CCF"),
             0x40 => {
                 self.ld(GeneralRegister::B, GeneralRegister::B);
             }
@@ -832,9 +869,7 @@ impl SharpSM83 {
             0x75 => {
                 self.ld_to_hl(memory, GeneralRegister::L);
             }
-            0x76 => {
-                println!("TODO: HALT");
-            }
+            0x76 => self.not_implemented("HALT"),
             0x77 => {
                 self.ld_to_hl(memory, GeneralRegister::A);
             }
@@ -884,9 +919,18 @@ impl SharpSM83 {
             0x85 => {
                 self.add(GeneralRegister::L);
             }
+            0x86 => self.not_implemented("ADD A, (HL)"),
             0x87 => {
                 self.add(GeneralRegister::A);
             }
+            0x88 => self.not_implemented("ADC A, B"),
+            0x89 => self.not_implemented("ADC A, C"),
+            0x8A => self.not_implemented("ADC A, D"),
+            0x8B => self.not_implemented("ADC A, E"),
+            0x8C => self.not_implemented("ADC A, H"),
+            0x8D => self.not_implemented("ADC A, L"),
+            0x8E => self.not_implemented("ADC A, (HL)"),
+            0x8F => self.not_implemented("ADC A, A"),
             0x90 => {
                 self.sub(GeneralRegister::B);
             }
@@ -905,30 +949,128 @@ impl SharpSM83 {
             0x95 => {
                 self.sub(GeneralRegister::L);
             }
+            0x96 => self.not_implemented("SUB A, (HL)"),
             0x97 => {
                 self.sub(GeneralRegister::A);
             }
+            0x98 => self.not_implemented("SBC A, B"),
+            0x99 => self.not_implemented("SBC A, C"),
+            0x9A => self.not_implemented("SBC A, D"),
+            0x9B => self.not_implemented("SBC A, E"),
+            0x9C => self.not_implemented("SBC A, H"),
+            0x9D => self.not_implemented("SBC A, L"),
+            0x9E => self.not_implemented("SBC A, (HL)"),
+            0x9F => self.not_implemented("SBC A, A"),
+            0xA0 => self.not_implemented("AND A, B"),
+            0xA1 => self.not_implemented("AND A, C"),
+            0xA2 => self.not_implemented("AND A, D"),
+            0xA3 => self.not_implemented("AND A, E"),
+            0xA4 => self.not_implemented("AND A, H"),
+            0xA5 => self.not_implemented("AND A, L"),
+            0xA6 => self.not_implemented("AND A, (HL)"),
+            0xA7 => self.not_implemented("AND A, A"),
+            0xA8 => self.not_implemented("XOR A, B"),
+            0xA9 => self.not_implemented("XOR A, C"),
+            0xAA => self.not_implemented("XOR A, D"),
+            0xAB => self.not_implemented("XOR A, E"),
+            0xAC => self.not_implemented("XOR A, H"),
+            0xAD => self.not_implemented("XOR A, L"),
+            0xAE => self.not_implemented("XOR A, (HL)"),
+            0xAF => self.not_implemented("XOR A, A"),
+            0xB0 => self.not_implemented("OR A, B"),
+            0xB1 => self.not_implemented("OR A, C"),
+            0xB2 => self.not_implemented("OR A, D"),
+            0xB3 => self.not_implemented("OR A, E"),
+            0xB4 => self.not_implemented("OR A, H"),
+            0xB5 => self.not_implemented("OR A, L"),
+            0xB6 => self.not_implemented("OR A, (HL)"),
+            0xB7 => self.not_implemented("OR A, A"),
+            0xB8 => self.not_implemented("CP A, B"),
+            0xB9 => self.not_implemented("CP A, C"),
+            0xBA => self.not_implemented("CP A, D"),
+            0xBB => self.not_implemented("CP A, E"),
+            0xBC => self.not_implemented("CP A, H"),
+            0xBD => self.not_implemented("CP A, L"),
+            0xBE => self.not_implemented("CP A, (HL)"),
+            0xBF => self.not_implemented("CP A, A"),
+            0xC0 => self.not_implemented("RET NZ"),
+            0xC1 => self.not_implemented("POP BC"),
             0xC2 => {
-                self.jp(cartridge, Some(FlagRegisterValue::NZ));
+                self.jp(memory, Some(FlagRegisterValue::NZ));
             }
             0xC3 => {
-                self.jp(cartridge, None);
+                self.jp(memory, None);
             }
+            0xC4 => self.not_implemented("CALL NZ, u16"),
+            0xC5 => self.not_implemented("PUSH BC"),
+            0xC6 => self.not_implemented("ADD A, u8"),
+            0xC7 => self.not_implemented("RST 00h"),
+            0xC8 => self.not_implemented("RET Z"),
+            0xC9 => self.not_implemented("RET"),
             0xCA => {
-                self.jp(cartridge, Some(FlagRegisterValue::Z));
+                self.jp(memory, Some(FlagRegisterValue::Z));
             }
             0xCB => {
-                println!("TODO: Prefixes ;)");
+                self.not_implemented("Prefixes ;)");
             }
+            0xCC => self.not_implemented("CALL Z, u16"),
             0xCD => {
-                self.call(cartridge, memory);
+                self.call(memory);
             }
+            0xCE => self.not_implemented("ADC A, u8"),
+            0xCF => self.not_implemented("RST 08h"),
+            0xD0 => self.not_implemented("RET NC"),
+            0xD1 => self.not_implemented("POP DE"),
             0xD2 => {
-                self.jp(cartridge, Some(FlagRegisterValue::NC));
+                self.jp(memory, Some(FlagRegisterValue::NC));
             }
+            0xD3 => (),
+            0xD4 => self.not_implemented("CALL NC, u16"),
+            0xD5 => self.not_implemented("PUSH DE"),
+            0xD6 => self.not_implemented("SUB A, u8"),
+            0xD7 => self.not_implemented("RST 10h"),
+            0xD8 => self.not_implemented("RET C"),
+            0xD9 => self.not_implemented("RETI"),
             0xDA => {
-                self.jp(cartridge, Some(FlagRegisterValue::C));
+                self.jp(memory, Some(FlagRegisterValue::C));
             }
+            0xDB => (),
+            0xDC => self.not_implemented("CALL C, u16"),
+            0xDD => (),
+            0xDE => self.not_implemented("SBC A, u8"),
+            0xDF => self.not_implemented("RST 18h"),
+            0xE0 => self.not_implemented("ld (FF00+u8), A"),
+            0xE1 => self.not_implemented("POP HL"),
+            0xE2 => self.not_implemented("LD (FF00+C), A"),
+            0xE3 => (),
+            0xE4 => (),
+            0xE5 => self.not_implemented("PUSH HL"),
+            0xE6 => self.not_implemented("AND A, u8"),
+            0xE7 => self.not_implemented("RST 20h"),
+            0xE8 => self.not_implemented("ADD SP, i8"),
+            0xE9 => self.not_implemented("JP HL"),
+            0xEA => self.not_implemented("LD (u16), A"),
+            0xEB => (),
+            0xEC => (),
+            0xED => (),
+            0xEE => self.not_implemented("XOR A, u8"),
+            0xEF => self.not_implemented("RST 28h"),
+            0xF0 => self.not_implemented("LD A, (FF00+u8)"),
+            0xF1 => self.not_implemented("POP AF"),
+            0xF2 => self.not_implemented("LD A, (FF00+C)"),
+            0xF3 => self.not_implemented("DI"),
+            0xF4 => (),
+            0xF5 => self.not_implemented("PUSH AF"),
+            0xF6 => self.not_implemented("OR A, u8"),
+            0xF7 => self.not_implemented("RST 30h"),
+            0xF8 => self.not_implemented("LD HL, SP+i"),
+            0xF9 => self.not_implemented("LD SP, HL"),
+            0xFA => self.not_implemented("LD A, (u16)"),
+            0xFB => self.not_implemented("EI"),
+            0xFC => (),
+            0xFD => (),
+            0xFE => self.not_implemented("CP A, u8"),
+            0xFF => self.not_implemented("RST 38h"),
             _ => {
                 println!("{:#06x}: Not Implemented", self.program_counter);
                 self.program_counter += 1;

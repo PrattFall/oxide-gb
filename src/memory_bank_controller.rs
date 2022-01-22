@@ -70,7 +70,7 @@ impl MBC1 {
                     .collect(),
             },
             video_ram: vec![0x0000; 0x9fff - 0x8000],
-            work_ram: vec![0x0000; 0xdfff - 0xc0000],
+            work_ram: vec![0x0000; 0xdfff - 0xc000],
             sprite_attribute_table: vec![0x0000; 0xfe9f - 0xfe00],
             io_registers: vec![0x0000; 0xff7f - 0xff00],
             high_ram: vec![0x0000; 0xfffe - 0xff80],
