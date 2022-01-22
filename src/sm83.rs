@@ -1,5 +1,5 @@
 use crate::flag_register::{FlagRegister, FlagRegisterValue};
-use crate::memory::MemoryMap;
+use crate::memory_bank_controller::MemoryBankController;
 use std::collections::HashMap;
 use std::num::Wrapping;
 
@@ -75,11 +75,11 @@ impl SharpSM83 {
 
     fn set_register_from_memory(
         &mut self,
-        memory: &mut MemoryMap,
+        memory: &mut MemoryBankController,
         register: GeneralRegister,
         location: u16,
     ) {
-        let value = memory.get_value(usize::from(location));
+        let value = memory.read_memory(usize::from(location));
 
         if self.debug {
             println!(
@@ -204,13 +204,13 @@ impl SharpSM83 {
         self.get_register(GeneralRegister::F).contains_flag(flag)
     }
 
-    fn call(&mut self, cartridge: &Vec<u8>, memory: &mut MemoryMap) {
+    fn call(&mut self, cartridge: &Vec<u8>, memory: &mut MemoryBankController) {
         let call_location = self.get_next_u16(cartridge);
         let [left, right] = u16_to_u8s(self.program_counter);
 
         self.stack_pointer -= 2;
-        memory.set_value(usize::from(self.stack_pointer), left);
-        memory.set_value(usize::from(self.stack_pointer + 1), right);
+        memory.write_memory(usize::from(self.stack_pointer), left);
+        memory.write_memory(usize::from(self.stack_pointer + 1), right);
         self.program_counter = call_location;
     }
 
@@ -473,7 +473,7 @@ impl SharpSM83 {
         self.program_counter += 3;
     }
 
-    fn ld_to_hl(&mut self, memory: &mut MemoryMap, register: GeneralRegister) {
+    fn ld_to_hl(&mut self, memory: &mut MemoryBankController, register: GeneralRegister) {
         if self.debug {
             println!(
                 "{:#06x}: Loading {:#04x} from Register {:?} to (HL)",
@@ -496,15 +496,15 @@ impl SharpSM83 {
         self.program_counter += 1;
     }
 
-    fn set_hl_in_memory(&mut self, memory: &mut MemoryMap, value: u8) {
-        memory.set_value(
+    fn set_hl_in_memory(&mut self, memory: &mut MemoryBankController, value: u8) {
+        memory.write_memory(
             usize::from(self.get_combined_register(CombinedRegister::HL)),
             value,
         );
     }
 
-    fn get_hl_from_memory(&mut self, memory: &MemoryMap) -> u8 {
-        memory.get_value(usize::from(
+    fn get_hl_from_memory(&mut self, memory: &MemoryBankController) -> u8 {
+        memory.read_memory(usize::from(
             self.get_combined_register(CombinedRegister::HL),
         ))
     }
@@ -525,7 +525,7 @@ impl SharpSM83 {
         );
     }
 
-    pub fn apply_operation(&mut self, cartridge: &Vec<u8>, memory: &mut MemoryMap) {
+    pub fn apply_operation(&mut self, cartridge: &Vec<u8>, memory: &mut MemoryBankController) {
         let op = cartridge[usize::from(self.program_counter)];
 
         if self.debug {
@@ -540,7 +540,7 @@ impl SharpSM83 {
                 self.ld_next_16(cartridge, CombinedRegister::BC);
             }
             0x02 => {
-                memory.set_value(
+                memory.write_memory(
                     usize::from(self.get_combined_register(CombinedRegister::BC)),
                     self.get_register(GeneralRegister::A),
                 );

@@ -11,7 +11,6 @@
 // - Resolution: 160x144
 // - 4 shades of grey
 
-use crate::memory::MemoryMap;
 use std::fs::File;
 use std::io;
 use std::io::prelude::*;
@@ -20,11 +19,10 @@ use std::io::BufReader;
 mod cartridge_header;
 mod cartridge_type;
 mod flag_register;
-mod memory;
 mod memory_bank_controller;
 mod sm83;
 
-use crate::cartridge_header::CartridgeHeader;
+use memory_bank_controller::make_controller;
 
 // struct PPU {}
 // struct LCD {}
@@ -41,9 +39,8 @@ fn main() -> io::Result<()> {
 
     reader.read_to_end(&mut cartridge_buffer)?;
 
-    let header = CartridgeHeader::from_binary(&cartridge_buffer);
     let mut cpu = sm83::SharpSM83::new();
-    let mut memory = header.ram_size.map(MemoryBankController::new);
+    let mut memory = make_controller(&cartridge_buffer);
 
     // Skip to the start of the actual program for now
     cpu.program_counter = 0x100;

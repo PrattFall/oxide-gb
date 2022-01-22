@@ -2,7 +2,6 @@ use std::ascii;
 use std::str;
 
 use crate::cartridge_type::CartridgeType;
-use crate::memory::MemoryBank;
 
 // const NINTENDO_LOGO_LOCATION: usize = 0x104;
 // const NINTENDO_LOGO_END: usize = 0x133;
@@ -16,11 +15,11 @@ const SGB_FLAG_LOCATION: usize = 0x146;
 const ROM_SIZE_LOCATION: usize = 0x148;
 const RAM_SIZE_LOCATION: usize = 0x149;
 
-fn buffer_slice_to_string(buffer: MemoryBank) -> String {
+fn buffer_slice_to_string(buffer: &[u8]) -> String {
     let mut visible = String::new();
 
     for b in buffer {
-        let part: Vec<u8> = ascii::escape_default(b).collect();
+        let part: Vec<u8> = ascii::escape_default(*b).collect();
         visible.push_str(str::from_utf8(&part).unwrap());
     }
 
@@ -47,7 +46,7 @@ pub enum DestinationCode {
     NonJapanese,
 }
 
-fn read_cgb_flag(buffer: Vec<u8>) -> ColorGameboySupport {
+fn read_cgb_flag(buffer: &[u8]) -> ColorGameboySupport {
     match buffer[CGB_FLAG_LOCATION] {
         0x80 => ColorGameboySupport::Both,
         0xC0 => ColorGameboySupport::OnlyColor,
@@ -55,7 +54,7 @@ fn read_cgb_flag(buffer: Vec<u8>) -> ColorGameboySupport {
     }
 }
 
-fn read_sgb_flag(buffer: Vec<u8>) -> SuperGameboySupport {
+fn read_sgb_flag(buffer: &[u8]) -> SuperGameboySupport {
     match buffer[SGB_FLAG_LOCATION] {
         0x03 => SuperGameboySupport::Support,
         _ => SuperGameboySupport::NoSupport,
@@ -80,30 +79,34 @@ fn read_rom_size_bytes(buffer: &[u8]) -> u32 {
     }
 }
 
+#[derive(Clone, Copy)]
 pub struct RamSpec {
-    pub size: u16,
-    pub banks: u8,
+    pub size: usize,
+    pub banks: usize,
 }
 
-fn read_ram_size(buffer: &[u8]) -> Option<RamSpec> {
+fn read_ram_size(buffer: &[u8]) -> RamSpec {
     match buffer[RAM_SIZE_LOCATION] {
-        0x02 => Some(RamSpec {
+        0x02 => RamSpec {
             size: 0x8000,
             banks: 1,
-        }),
-        0x03 => Some(RamSpec {
+        },
+        0x03 => RamSpec {
             size: 0x8000,
             banks: 4,
-        }),
-        0x04 => Some(RamSpec {
+        },
+        0x04 => RamSpec {
             size: 0x8000,
             banks: 16,
-        }),
-        0x05 => Some(RamSpec {
+        },
+        0x05 => RamSpec {
             size: 0x8000,
             banks: 8,
-        }),
-        _ => None,
+        },
+        _ => RamSpec {
+            size: 0x8000,
+            banks: 0,
+        },
     }
 }
 
@@ -124,7 +127,7 @@ pub struct CartridgeHeader {
     pub color_gameboy_support: ColorGameboySupport,
     pub super_gameboy_support: SuperGameboySupport,
     pub rom_size_bytes: u32,
-    pub ram_size: Option<RamSpec>,
+    pub ram_size: RamSpec,
     pub destination_code: DestinationCode,
 }
 
