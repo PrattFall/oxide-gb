@@ -85,28 +85,25 @@ pub struct RamSpec {
     pub banks: usize,
 }
 
-fn read_ram_size(buffer: &[u8]) -> RamSpec {
+fn read_ram_size(buffer: &[u8]) -> Option<RamSpec> {
     match buffer[RAM_SIZE_LOCATION] {
-        0x02 => RamSpec {
+        0x02 => Some(RamSpec {
             size: 0x8000,
             banks: 1,
-        },
-        0x03 => RamSpec {
+        }),
+        0x03 => Some(RamSpec {
             size: 0x8000,
             banks: 4,
-        },
-        0x04 => RamSpec {
+        }),
+        0x04 => Some(RamSpec {
             size: 0x8000,
             banks: 16,
-        },
-        0x05 => RamSpec {
+        }),
+        0x05 => Some(RamSpec {
             size: 0x8000,
             banks: 8,
-        },
-        _ => RamSpec {
-            size: 0x8000,
-            banks: 0,
-        },
+        }),
+        _ => None,
     }
 }
 
@@ -127,7 +124,7 @@ pub struct CartridgeHeader {
     pub color_gameboy_support: ColorGameboySupport,
     pub super_gameboy_support: SuperGameboySupport,
     pub rom_size_bytes: u32,
-    pub ram_size: RamSpec,
+    pub ram_size: Option<RamSpec>,
     pub destination_code: DestinationCode,
 }
 

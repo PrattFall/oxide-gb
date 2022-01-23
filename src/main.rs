@@ -11,35 +11,46 @@
 // - Resolution: 160x144
 // - 4 shades of grey
 
+use std::borrow::BorrowMut;
 use std::fs::File;
 use std::io;
-use std::io::prelude::*;
-use std::io::BufReader;
 
+mod cartridge;
 mod cartridge_header;
 mod cartridge_type;
 mod flag_register;
+mod mbc1;
 mod memory_bank_controller;
+mod no_mbc;
 mod sm83;
 
-use memory_bank_controller::make_controller;
+use crate::cartridge_type::CartridgeType;
+use crate::mbc1::MBC1;
+use crate::memory_bank_controller::MemoryBankController;
+use crate::no_mbc::NoMBC;
+
+use crate::cartridge::Cartridge;
+
+pub fn make_controller(cartridge: Cartridge) -> Box<dyn MemoryBankController> {
+    match cartridge.header.cartridge_type {
+        CartridgeType::MBC1 | CartridgeType::MBC1Ram | CartridgeType::MBC1RamBattery => {
+            Box::new(MBC1::from(cartridge))
+        }
+        _ => Box::new(NoMBC::from(cartridge)),
+    }
+}
 
 fn main() -> io::Result<()> {
     let f = File::open("test_games/test.gb")?;
-    let mut reader = BufReader::new(f);
-    let mut cartridge_buffer: Vec<u8> = Vec::new();
-
-    reader.read_to_end(&mut cartridge_buffer)?;
-
+    let cartridge = Cartridge::from(f);
+    let mut memory = make_controller(cartridge);
     let mut cpu = sm83::SharpSM83::new();
-    let mut memory = make_controller(&cartridge_buffer);
 
-    // Skip to the start of the actual program for now
     cpu.program_counter = 0x100;
     cpu.debug = true;
 
     loop {
-        cpu.apply_operation(&mut memory);
+        cpu.apply_operation(&mut *memory);
     }
 
     Ok(())

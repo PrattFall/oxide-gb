@@ -81,9 +81,9 @@ impl SharpSM83 {
         self.registers.insert(register, value);
     }
 
-    fn set_register_from_memory(
+    fn set_register_from_memory<T: MemoryBankController + ?Sized>(
         &mut self,
-        memory: &mut dyn MemoryBankController,
+        memory: &mut T,
         register: GeneralRegister,
         location: u16,
     ) {
@@ -212,7 +212,7 @@ impl SharpSM83 {
         self.get_register(GeneralRegister::F).contains_flag(flag)
     }
 
-    fn call(&mut self, memory: &mut dyn MemoryBankController) {
+    fn call<T: MemoryBankController + ?Sized>(&mut self, memory: &mut T) {
         let call_location = self.get_next_u16(memory);
         let [left, right] = u16_to_u8s(self.program_counter);
 
@@ -236,7 +236,7 @@ impl SharpSM83 {
         self.program_counter += 1;
     }
 
-    fn jp_inner(&mut self, memory: &dyn MemoryBankController) {
+    fn jp_inner<T: MemoryBankController + ?Sized>(&mut self, memory: &mut T) {
         let jump_location = self.get_next_u16(memory);
 
         if self.debug {
@@ -249,7 +249,11 @@ impl SharpSM83 {
         self.program_counter = jump_location;
     }
 
-    fn jp(&mut self, memory: &dyn MemoryBankController, flag: Option<FlagRegisterValue>) {
+    fn jp<T: MemoryBankController + ?Sized>(
+        &mut self,
+        memory: &mut T,
+        flag: Option<FlagRegisterValue>,
+    ) {
         match flag {
             Some(f) if self.is_flag_set(f) => {
                 self.jp_inner(memory);
@@ -271,7 +275,7 @@ impl SharpSM83 {
         }
     }
 
-    fn jr_inner(&mut self, memory: &dyn MemoryBankController) {
+    fn jr_inner<T: MemoryBankController + ?Sized>(&mut self, memory: &mut T) {
         // Jump to program_counter + u8
         let relative_location = u16::from(self.get_next_u8(memory));
 
@@ -287,7 +291,11 @@ impl SharpSM83 {
         self.program_counter += relative_location;
     }
 
-    fn jr(&mut self, memory: &dyn MemoryBankController, flag: Option<FlagRegisterValue>) {
+    fn jr<T: MemoryBankController + ?Sized>(
+        &mut self,
+        memory: &mut T,
+        flag: Option<FlagRegisterValue>,
+    ) {
         match flag {
             Some(f) if self.is_flag_set(f) => {
                 self.jr_inner(memory);
@@ -414,18 +422,22 @@ impl SharpSM83 {
         self.program_counter += 1;
     }
 
-    fn get_next_u8(&mut self, memory: &dyn MemoryBankController) -> u8 {
+    fn get_next_u8<T: MemoryBankController + ?Sized>(&mut self, memory: &mut T) -> u8 {
         memory.read_memory(usize::from(self.program_counter + 1))
     }
 
-    fn get_next_u16(&mut self, memory: &dyn MemoryBankController) -> u16 {
+    fn get_next_u16<T: MemoryBankController + ?Sized>(&mut self, memory: &mut T) -> u16 {
         u8s_to_u16(
             memory.read_memory(usize::from(self.program_counter + 1)),
             memory.read_memory(usize::from(self.program_counter + 2)),
         )
     }
 
-    fn ld_next_8(&mut self, memory: &dyn MemoryBankController, register: GeneralRegister) {
+    fn ld_next_8<T: MemoryBankController + ?Sized>(
+        &mut self,
+        memory: &mut T,
+        register: GeneralRegister,
+    ) {
         let loaded_value = self.get_next_u8(memory);
 
         self.set_register(register, loaded_value);
@@ -440,7 +452,11 @@ impl SharpSM83 {
         self.program_counter += 2;
     }
 
-    fn ld_next_16(&mut self, memory: &dyn MemoryBankController, register: CombinedRegister) {
+    fn ld_next_16<T: MemoryBankController + ?Sized>(
+        &mut self,
+        memory: &mut T,
+        register: CombinedRegister,
+    ) {
         let loaded_value = self.get_next_u16(memory);
 
         self.set_combined_register(register, loaded_value);
@@ -455,7 +471,7 @@ impl SharpSM83 {
         self.program_counter += 3;
     }
 
-    fn ld_to_stack_pointer(&mut self, memory: &dyn MemoryBankController) {
+    fn ld_to_stack_pointer<T: MemoryBankController + ?Sized>(&mut self, memory: &mut T) {
         let loaded_value = self.get_next_u16(memory);
 
         if self.debug {
@@ -470,7 +486,11 @@ impl SharpSM83 {
         self.program_counter += 3;
     }
 
-    fn ld_to_hl(&mut self, memory: &mut dyn MemoryBankController, register: GeneralRegister) {
+    fn ld_to_hl<T: MemoryBankController + ?Sized>(
+        &mut self,
+        memory: &mut T,
+        register: GeneralRegister,
+    ) {
         if self.debug {
             println!(
                 "{:#06x}: Loading {:#04x} from Register {:?} to (HL)",
@@ -493,14 +513,14 @@ impl SharpSM83 {
         self.program_counter += 1;
     }
 
-    fn set_hl_in_memory(&mut self, memory: &mut dyn MemoryBankController, value: u8) {
+    fn set_hl_in_memory<T: MemoryBankController + ?Sized>(&mut self, memory: &mut T, value: u8) {
         memory.write_memory(
             usize::from(self.get_combined_register(CombinedRegister::HL)),
             value,
         );
     }
 
-    fn get_hl_from_memory(&mut self, memory: &dyn MemoryBankController) -> u8 {
+    fn get_hl_from_memory<T: MemoryBankController + ?Sized>(&mut self, memory: &mut T) -> u8 {
         memory.read_memory(usize::from(
             self.get_combined_register(CombinedRegister::HL),
         ))
@@ -522,7 +542,7 @@ impl SharpSM83 {
         );
     }
 
-    pub fn apply_operation(&mut self, memory: &mut dyn MemoryBankController) {
+    pub fn apply_operation<T: MemoryBankController + ?Sized>(&mut self, memory: &mut T) {
         let op = memory.read_memory(usize::from(self.program_counter));
 
         if self.debug {
