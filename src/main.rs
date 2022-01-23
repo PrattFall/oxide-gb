@@ -11,7 +11,6 @@
 // - Resolution: 160x144
 // - 4 shades of grey
 
-use std::borrow::BorrowMut;
 use std::fs::File;
 use std::io;
 
@@ -52,6 +51,4 @@ fn main() -> io::Result<()> {
     loop {
         cpu.apply_operation(&mut *memory);
     }
-
-    Ok(())
 }
