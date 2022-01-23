@@ -43,19 +43,15 @@ impl SharpSM83 {
     }
 
     fn inc(&mut self, register: GeneralRegister) {
-        self.unset_flag(FlagRegisterValue::N);
+        self.registers.unset_flag(FlagRegisterValue::N);
 
         if add_should_half_carry(self.registers.get(register), 1) {
-            self.set_flag(FlagRegisterValue::H);
+            self.registers.set_flag(FlagRegisterValue::H);
         }
 
         let register_value = self.registers.get(register);
 
-        if register_value == 0xFF {
-            self.registers.set(register, 0);
-        } else {
-            self.registers.set(register, register_value + 1);
-        }
+        self.registers.set(register, register_value.wrapping_add(1));
 
         if self.debug {
             println!(
@@ -125,8 +121,8 @@ impl SharpSM83 {
             self.registers.get(GeneralRegister::A) ^ 0xFF,
         );
 
-        self.set_flag(FlagRegisterValue::N);
-        self.set_flag(FlagRegisterValue::H);
+        self.registers.set_flag(FlagRegisterValue::N);
+        self.registers.set_flag(FlagRegisterValue::H);
 
         self.program_counter += 1;
     }
@@ -212,25 +208,11 @@ impl SharpSM83 {
         }
     }
 
-    fn set_flag(&mut self, flag: FlagRegisterValue) {
-        self.registers.set(
-            GeneralRegister::F,
-            self.registers.get(GeneralRegister::F).set_flag(flag),
-        );
-    }
-
-    fn unset_flag(&mut self, flag: FlagRegisterValue) {
-        self.registers.set(
-            GeneralRegister::F,
-            self.registers.get(GeneralRegister::F).unset_flag(flag),
-        );
-    }
-
     fn dec(&mut self, register: GeneralRegister) {
-        self.set_flag(FlagRegisterValue::N);
+        self.registers.set_flag(FlagRegisterValue::N);
 
         if sub_should_half_carry(self.registers.get(register), 1) {
-            self.set_flag(FlagRegisterValue::H);
+            self.registers.set_flag(FlagRegisterValue::H);
         }
 
         let register_value = self.registers.get(register);
@@ -263,23 +245,23 @@ impl SharpSM83 {
         let a_val = self.registers.get(GeneralRegister::A);
         let r_val = self.registers.get(register);
 
-        self.set_flag(FlagRegisterValue::N);
+        self.registers.set_flag(FlagRegisterValue::N);
 
-        if Wrapping(r_val) + Wrapping(a_val) > Wrapping(0xFF) {
+        if 0xff - a_val < r_val {
             self.registers
                 .set(GeneralRegister::A, r_val.wrapping_add(a_val));
-            self.set_flag(FlagRegisterValue::C);
+            self.registers.set_flag(FlagRegisterValue::C);
         } else {
             self.registers
                 .set(GeneralRegister::A, a_val.wrapping_sub(r_val));
         }
 
         if sub_should_half_carry(a_val, self.registers.get(GeneralRegister::A)) {
-            self.set_flag(FlagRegisterValue::H);
+            self.registers.set_flag(FlagRegisterValue::H);
         }
 
         if self.registers.get(GeneralRegister::A) == 0 {
-            self.set_flag(FlagRegisterValue::Z);
+            self.registers.set_flag(FlagRegisterValue::Z);
         }
 
         self.program_counter += 1;
@@ -299,23 +281,23 @@ impl SharpSM83 {
         let a_val = self.registers.get(GeneralRegister::A);
         let r_val = self.registers.get(register);
 
-        self.set_flag(FlagRegisterValue::N);
+        self.registers.set_flag(FlagRegisterValue::N);
 
         if r_val > a_val {
             self.registers
                 .set(GeneralRegister::A, a_val.wrapping_sub(r_val));
-            self.set_flag(FlagRegisterValue::C);
+            self.registers.set_flag(FlagRegisterValue::C);
         } else {
             self.registers
                 .set(GeneralRegister::A, a_val.wrapping_sub(r_val));
         }
 
         if sub_should_half_carry(a_val, self.registers.get(GeneralRegister::A)) {
-            self.set_flag(FlagRegisterValue::H);
+            self.registers.set_flag(FlagRegisterValue::H);
         }
 
         if self.registers.get(GeneralRegister::A) == 0 {
-            self.set_flag(FlagRegisterValue::Z);
+            self.registers.set_flag(FlagRegisterValue::Z);
         }
 
         self.program_counter += 1;
@@ -419,11 +401,11 @@ impl SharpSM83 {
         );
     }
 
-    fn get_hl_from_memory<T: MemoryBankController + ?Sized>(&mut self, memory: &mut T) -> u8 {
-        memory.read_memory(usize::from(
-            self.registers.get_combined(CombinedRegister::HL),
-        ))
-    }
+    // fn get_hl_from_memory<T: MemoryBankController + ?Sized>(&mut self, memory: &mut T) -> u8 {
+    //     memory.read_memory(usize::from(
+    //         self.registers.get_combined(CombinedRegister::HL),
+    //     ))
+    // }
 
     fn display_current_registers(&self, op: u8) {
         println!(

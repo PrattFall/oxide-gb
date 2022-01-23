@@ -15,7 +15,7 @@ impl From<Cartridge> for NoMBC {
     fn from(cartridge: Cartridge) -> Self {
         NoMBC {
             ram: cartridge.header.ram_size.map(|s| vec![0x00; s.size]),
-            rom: vec![0x00; 0x7fff],
+            rom: cartridge.data,
             video_ram: vec![0x0000; 0x9fff - 0x8000],
             work_ram: vec![0x0000; 0xdfff - 0xc000],
             sprite_attribute_table: vec![0x0000; 0xfe9f - 0xfe00],

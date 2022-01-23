@@ -1,3 +1,4 @@
+use crate::flag_register::{FlagRegister, FlagRegisterValue};
 use crate::utils::{u16_to_u8s, u8s_to_u16};
 use std::collections::HashMap;
 
@@ -74,6 +75,20 @@ impl Registers {
                 u8s_to_u16(self.get(GeneralRegister::H), self.get(GeneralRegister::L))
             }
         }
+    }
+
+    pub fn set_flag(&mut self, flag: FlagRegisterValue) {
+        self.set(
+            GeneralRegister::F,
+            self.get(GeneralRegister::F).set_flag(flag),
+        );
+    }
+
+    pub fn unset_flag(&mut self, flag: FlagRegisterValue) {
+        self.set(
+            GeneralRegister::F,
+            self.get(GeneralRegister::F).unset_flag(flag),
+        )
     }
 }
 
