@@ -2,7 +2,6 @@ use crate::cpu_registers::{CombinedRegister, GeneralRegister, Registers};
 use crate::flag_register::{FlagRegister, FlagRegisterValue};
 use crate::memory_bank_controller::MemoryBankController;
 use crate::utils::{add_should_half_carry, sub_should_half_carry, u16_to_u8s, u8s_to_u16};
-use std::num::Wrapping;
 
 // const CLOCK_MHZ: f64 = 4.194304;
 
@@ -14,31 +13,17 @@ pub struct SharpSM83 {
     pub debug: bool,
 }
 
+enum MemoryOffset {
+    Plus,
+    Minus,
+}
+
 impl SharpSM83 {
     fn not_implemented(&mut self, message: &str) {
         if self.debug {
             println!("TODO: {}", message);
         }
 
-        self.program_counter += 1;
-    }
-
-    fn set_register_from_memory<T: MemoryBankController + ?Sized>(
-        &mut self,
-        memory: &mut T,
-        register: GeneralRegister,
-        location: u16,
-    ) {
-        let value = memory.read_memory(usize::from(location));
-
-        if self.debug {
-            println!(
-                "{:#06x}: Setting value {:#04x} to register {:?} from location {:#06x}",
-                self.program_counter, value, register, location
-            );
-        }
-
-        self.registers.set(register, value);
         self.program_counter += 1;
     }
 
@@ -103,13 +88,13 @@ impl SharpSM83 {
         self.registers.get(GeneralRegister::F).contains_flag(flag)
     }
 
-    fn call<T: MemoryBankController + ?Sized>(&mut self, memory: &mut T) {
-        let call_location = self.get_next_u16(memory);
+    fn call<T: MemoryBankController + ?Sized>(&mut self, mbc: &mut T) {
+        let call_location = self.get_next_u16(mbc);
         let [left, right] = u16_to_u8s(self.program_counter);
 
         self.stack_pointer = self.stack_pointer.wrapping_sub(2);
-        memory.write_memory(usize::from(self.stack_pointer), left);
-        memory.write_memory(usize::from(self.stack_pointer + 1), right);
+        mbc.write_memory(usize::from(self.stack_pointer), left);
+        mbc.write_memory(usize::from(self.stack_pointer + 1), right);
         self.program_counter = call_location;
     }
 
@@ -127,29 +112,13 @@ impl SharpSM83 {
         self.program_counter += 1;
     }
 
-    fn jp_inner<T: MemoryBankController + ?Sized>(&mut self, memory: &mut T) {
-        let jump_location = self.get_next_u16(memory);
-
-        if self.debug {
-            println!(
-                "{:#06x}: Jumping to {:#06x}",
-                self.program_counter, jump_location
-            );
-        }
-
-        self.program_counter = jump_location;
-    }
-
     fn jp<T: MemoryBankController + ?Sized>(
         &mut self,
-        memory: &mut T,
+        mbc: &mut T,
         flag: Option<FlagRegisterValue>,
     ) {
         match flag {
-            Some(f) if self.is_flag_set(f) => {
-                self.jp_inner(memory);
-            }
-            Some(f) => {
+            Some(f) if !self.is_flag_set(f) => {
                 if self.debug {
                     println!(
                         "Flag {:?} not set. Found {:#06x}",
@@ -160,38 +129,28 @@ impl SharpSM83 {
 
                 self.program_counter += 1;
             }
-            None => {
-                self.jp_inner(memory);
+            _ => {
+                let jump_location = self.get_next_u16(mbc);
+
+                if self.debug {
+                    println!(
+                        "{:#06x}: Jumping to {:#06x}",
+                        self.program_counter, jump_location
+                    );
+                }
+
+                self.program_counter = jump_location;
             }
         }
-    }
-
-    fn jr_inner<T: MemoryBankController + ?Sized>(&mut self, memory: &mut T) {
-        // Jump to program_counter + u8
-        let relative_location = u16::from(self.get_next_u8(memory));
-
-        if self.debug {
-            println!(
-                "{:#06x}: Jumping {:#06x} ops to {:#06x}",
-                self.program_counter,
-                relative_location,
-                self.program_counter + relative_location
-            );
-        }
-
-        self.program_counter += relative_location;
     }
 
     fn jr<T: MemoryBankController + ?Sized>(
         &mut self,
-        memory: &mut T,
+        mbc: &mut T,
         flag: Option<FlagRegisterValue>,
     ) {
         match flag {
-            Some(f) if self.is_flag_set(f) => {
-                self.jr_inner(memory);
-            }
-            Some(f) => {
+            Some(f) if !self.is_flag_set(f) => {
                 if self.debug {
                     println!(
                         "Flag {:?} not set. Found {:#06x}",
@@ -202,8 +161,20 @@ impl SharpSM83 {
 
                 self.program_counter += 1;
             }
-            None => {
-                self.jr_inner(memory);
+            _ => {
+                // Jump to program_counter + u8
+                let relative_location = u16::from(self.get_next_u8(mbc));
+
+                if self.debug {
+                    println!(
+                        "{:#06x}: Jumping {:#06x} ops to {:#06x}",
+                        self.program_counter,
+                        relative_location,
+                        self.program_counter + relative_location
+                    );
+                }
+
+                self.program_counter += relative_location;
             }
         }
     }
@@ -248,13 +219,11 @@ impl SharpSM83 {
         self.registers.set_flag(FlagRegisterValue::N);
 
         if 0xff - a_val < r_val {
-            self.registers
-                .set(GeneralRegister::A, r_val.wrapping_add(a_val));
             self.registers.set_flag(FlagRegisterValue::C);
-        } else {
-            self.registers
-                .set(GeneralRegister::A, a_val.wrapping_sub(r_val));
         }
+
+        self.registers
+            .set(GeneralRegister::A, r_val.wrapping_add(a_val));
 
         if sub_should_half_carry(a_val, self.registers.get(GeneralRegister::A)) {
             self.registers.set_flag(FlagRegisterValue::H);
@@ -284,13 +253,11 @@ impl SharpSM83 {
         self.registers.set_flag(FlagRegisterValue::N);
 
         if r_val > a_val {
-            self.registers
-                .set(GeneralRegister::A, a_val.wrapping_sub(r_val));
             self.registers.set_flag(FlagRegisterValue::C);
-        } else {
-            self.registers
-                .set(GeneralRegister::A, a_val.wrapping_sub(r_val));
         }
+
+        self.registers
+            .set(GeneralRegister::A, a_val.wrapping_sub(r_val));
 
         if sub_should_half_carry(a_val, self.registers.get(GeneralRegister::A)) {
             self.registers.set_flag(FlagRegisterValue::H);
@@ -303,23 +270,23 @@ impl SharpSM83 {
         self.program_counter += 1;
     }
 
-    fn get_next_u8<T: MemoryBankController + ?Sized>(&mut self, memory: &mut T) -> u8 {
-        memory.read_memory(usize::from(self.program_counter + 1))
+    fn get_next_u8<T: MemoryBankController + ?Sized>(&mut self, mbc: &mut T) -> u8 {
+        mbc.read_memory(usize::from(self.program_counter + 1))
     }
 
-    fn get_next_u16<T: MemoryBankController + ?Sized>(&mut self, memory: &mut T) -> u16 {
+    fn get_next_u16<T: MemoryBankController + ?Sized>(&mut self, mbc: &mut T) -> u16 {
         u8s_to_u16(
-            memory.read_memory(usize::from(self.program_counter + 1)),
-            memory.read_memory(usize::from(self.program_counter + 2)),
+            mbc.read_memory(usize::from(self.program_counter + 1)),
+            mbc.read_memory(usize::from(self.program_counter + 2)),
         )
     }
 
     fn ld_next_8<T: MemoryBankController + ?Sized>(
         &mut self,
-        memory: &mut T,
+        mbc: &mut T,
         register: GeneralRegister,
     ) {
-        let loaded_value = self.get_next_u8(memory);
+        let loaded_value = self.get_next_u8(mbc);
 
         self.registers.set(register, loaded_value);
 
@@ -335,10 +302,10 @@ impl SharpSM83 {
 
     fn ld_next_16<T: MemoryBankController + ?Sized>(
         &mut self,
-        memory: &mut T,
+        mbc: &mut T,
         register: CombinedRegister,
     ) {
-        let loaded_value = self.get_next_u16(memory);
+        let loaded_value = self.get_next_u16(mbc);
 
         self.registers.set_combined(register, loaded_value);
 
@@ -352,8 +319,8 @@ impl SharpSM83 {
         self.program_counter += 3;
     }
 
-    fn ld_to_stack_pointer<T: MemoryBankController + ?Sized>(&mut self, memory: &mut T) {
-        let loaded_value = self.get_next_u16(memory);
+    fn ld_to_stack_pointer<T: MemoryBankController + ?Sized>(&mut self, mbc: &mut T) {
+        let loaded_value = self.get_next_u16(mbc);
 
         if self.debug {
             println!(
@@ -367,25 +334,6 @@ impl SharpSM83 {
         self.program_counter += 3;
     }
 
-    fn ld_to_hl<T: MemoryBankController + ?Sized>(
-        &mut self,
-        memory: &mut T,
-        register: GeneralRegister,
-    ) {
-        if self.debug {
-            println!(
-                "{:#06x}: Loading {:#04x} from Register {:?} to (HL)",
-                self.program_counter,
-                self.registers.get(register),
-                register,
-            );
-        }
-
-        self.set_hl_in_memory(memory, self.registers.get(register));
-
-        self.program_counter += 1;
-    }
-
     fn nop(&mut self) {
         if self.debug {
             println!("{:#06x}: NOP", self.program_counter);
@@ -393,19 +341,6 @@ impl SharpSM83 {
 
         self.program_counter += 1;
     }
-
-    fn set_hl_in_memory<T: MemoryBankController + ?Sized>(&mut self, memory: &mut T, value: u8) {
-        memory.write_memory(
-            usize::from(self.registers.get_combined(CombinedRegister::HL)),
-            value,
-        );
-    }
-
-    // fn get_hl_from_memory<T: MemoryBankController + ?Sized>(&mut self, memory: &mut T) -> u8 {
-    //     memory.read_memory(usize::from(
-    //         self.registers.get_combined(CombinedRegister::HL),
-    //     ))
-    // }
 
     fn display_current_registers(&self, op: u8) {
         println!(
@@ -423,84 +358,165 @@ impl SharpSM83 {
         );
     }
 
-    pub fn apply_operation<T: MemoryBankController + ?Sized>(&mut self, memory: &mut T) {
-        let op = memory.read_memory(usize::from(self.program_counter));
+    fn read_memory_with_offset<T: MemoryBankController + ?Sized>(
+        &mut self,
+        mbc: &mut T,
+        location: CombinedRegister,
+        offset: Option<MemoryOffset>,
+    ) -> u16 {
+        let memory_loc = self.registers.get_combined(location);
 
-        if self.debug {
-            self.display_current_registers(op);
+        match offset {
+            None => memory_loc,
+            Some(MemoryOffset::Plus) => memory_loc.wrapping_add(1),
+            Some(MemoryOffset::Minus) => memory_loc.wrapping_sub(1),
         }
+    }
+
+    fn ld_rr_r<T: MemoryBankController + ?Sized>(
+        &mut self,
+        mbc: &mut T,
+        location: CombinedRegister,
+        register: GeneralRegister,
+        offset: Option<MemoryOffset>,
+    ) {
+        if self.debug {
+            println!(
+                "{:#06x}: Loading {:#04x} from Register {:?} to ({:?})",
+                self.program_counter,
+                self.registers.get(register),
+                register,
+                location,
+            );
+        }
+
+        let memory_location = self.read_memory_with_offset(mbc, location, offset);
+
+        mbc.write_memory(usize::from(memory_location), self.registers.get(register));
+
+        self.program_counter += 1;
+    }
+
+    fn ld_r_rr<T: MemoryBankController + ?Sized>(
+        &mut self,
+        mbc: &mut T,
+        register: GeneralRegister,
+        location: CombinedRegister,
+        offset: Option<MemoryOffset>,
+    ) {
+        if self.debug {
+            println!(
+                "{:#06x}: Loading {:#04x} from Location ({:?}) to {:?}",
+                self.program_counter,
+                self.registers.get(register),
+                location,
+                register,
+            );
+        }
+
+        let memory_location = self.read_memory_with_offset(mbc, location, offset);
+
+        self.registers
+            .set(register, mbc.read_memory(usize::from(memory_location)));
+
+        self.program_counter += 1;
+    }
+
+    fn ld_to_hl<T: MemoryBankController + ?Sized>(
+        &mut self,
+        mbc: &mut T,
+        register: GeneralRegister,
+    ) {
+        self.ld_rr_r(mbc, CombinedRegister::HL, register, None);
+    }
+
+    pub fn apply_operation<T: MemoryBankController + ?Sized>(&mut self, mbc: &mut T) {
+        let op = mbc.read_memory(usize::from(self.program_counter));
 
         match op {
             0x00 => self.nop(),
-            0x01 => self.ld_next_16(memory, CombinedRegister::BC),
-            0x02 => {
-                memory.write_memory(
-                    usize::from(self.registers.get_combined(CombinedRegister::BC)),
-                    self.registers.get(GeneralRegister::A),
-                );
-
-                self.program_counter += 1;
-            }
+            0x01 => self.ld_next_16(mbc, CombinedRegister::BC),
+            0x02 => self.ld_rr_r(mbc, CombinedRegister::BC, GeneralRegister::A, None),
             0x03 => self.inc16(CombinedRegister::BC),
             0x04 => self.inc(GeneralRegister::B),
             0x05 => self.dec(GeneralRegister::B),
-            0x06 => self.ld_next_8(memory, GeneralRegister::B),
+            0x06 => self.ld_next_8(mbc, GeneralRegister::B),
             0x07 => self.not_implemented("RLCA"),
             0x08 => self.not_implemented("LD (u16), Stack Pointer"),
             0x09 => self.not_implemented("ADD HL, BC"),
-            0x0A => self.not_implemented("TODO: ADD HL, BC"),
-            0x0B => self.not_implemented("LD A, (BC)"),
+            0x0A => self.ld_r_rr(mbc, GeneralRegister::A, CombinedRegister::BC, None),
+            0x0B => self.not_implemented("DEC BC"),
             0x0C => self.inc(GeneralRegister::C),
             0x0D => self.dec(GeneralRegister::C),
-            0x0E => self.ld_next_8(memory, GeneralRegister::C),
+            0x0E => self.ld_next_8(mbc, GeneralRegister::C),
             0x0F => self.not_implemented("RRCA"),
             0x10 => self.not_implemented("STOP"),
-            0x11 => self.ld_next_16(memory, CombinedRegister::DE),
-            0x12 => self.not_implemented("LD (DE), A"),
+            0x11 => self.ld_next_16(mbc, CombinedRegister::DE),
+            0x12 => self.ld_rr_r(mbc, CombinedRegister::DE, GeneralRegister::A, None),
             0x13 => self.inc16(CombinedRegister::DE),
             0x14 => self.inc(GeneralRegister::D),
             0x15 => self.dec(GeneralRegister::D),
-            0x16 => self.ld_next_8(memory, GeneralRegister::D),
+            0x16 => self.ld_next_8(mbc, GeneralRegister::D),
             0x17 => self.not_implemented("RLA"),
-            0x18 => self.jr(memory, None),
+            0x18 => self.jr(mbc, None),
             0x19 => self.not_implemented("ADD HL, DE"),
-            0x1A => self.not_implemented("LD A, (DE)"),
+            0x1A => self.ld_r_rr(mbc, GeneralRegister::A, CombinedRegister::DE, None),
             0x1B => self.not_implemented("DEC DE"),
             0x1C => self.inc(GeneralRegister::E),
             0x1D => self.dec(GeneralRegister::E),
-            0x1E => self.ld_next_8(memory, GeneralRegister::E),
+            0x1E => self.ld_next_8(mbc, GeneralRegister::E),
             0x1F => self.not_implemented("RRA"),
-            0x20 => self.jr(memory, Some(FlagRegisterValue::NZ)),
-            0x21 => self.ld_next_16(memory, CombinedRegister::HL),
-            0x22 => self.not_implemented("LD (HL+), A"),
+            0x20 => self.jr(mbc, Some(FlagRegisterValue::NZ)),
+            0x21 => self.ld_next_16(mbc, CombinedRegister::HL),
+            0x22 => self.ld_rr_r(
+                mbc,
+                CombinedRegister::HL,
+                GeneralRegister::A,
+                Some(MemoryOffset::Plus),
+            ),
             0x23 => self.inc16(CombinedRegister::HL),
             0x24 => self.inc(GeneralRegister::H),
             0x25 => self.dec(GeneralRegister::H),
             0x26 => self.not_implemented("DAA"),
             0x27 => self.not_implemented("JR Z, u8"),
-            0x28 => self.jr(memory, Some(FlagRegisterValue::Z)),
+            0x28 => self.jr(mbc, Some(FlagRegisterValue::Z)),
             0x29 => self.not_implemented("ADD HL, HL"),
-            0x2A => self.not_implemented("LD A, (HL+)"),
+            0x2A => self.ld_r_rr(
+                mbc,
+                GeneralRegister::A,
+                CombinedRegister::HL,
+                Some(MemoryOffset::Plus),
+            ),
             0x2B => self.not_implemented("DEC HL"),
             0x2C => self.inc(GeneralRegister::L),
             0x2D => self.dec(GeneralRegister::L),
-            0x2E => self.ld_next_8(memory, GeneralRegister::L),
+            0x2E => self.ld_next_8(mbc, GeneralRegister::L),
             0x2F => self.cpl(),
-            0x30 => self.jr(memory, Some(FlagRegisterValue::NC)),
-            0x31 => self.ld_to_stack_pointer(memory),
-            0x32 => self.not_implemented("LD (HL-), A"),
+            0x30 => self.jr(mbc, Some(FlagRegisterValue::NC)),
+            0x31 => self.ld_to_stack_pointer(mbc),
+            0x32 => self.ld_rr_r(
+                mbc,
+                CombinedRegister::HL,
+                GeneralRegister::A,
+                Some(MemoryOffset::Minus),
+            ),
             0x33 => self.not_implemented("INC SP"),
             0x34 => self.not_implemented("INC (HL) 1"),
             0x35 => self.not_implemented("DEC (HL) 1"),
             0x36 => self.not_implemented("LD (HL), u8"),
             0x37 => self.not_implemented("SCF"),
-            0x38 => self.jr(memory, Some(FlagRegisterValue::C)),
+            0x38 => self.jr(mbc, Some(FlagRegisterValue::C)),
             0x39 => self.not_implemented("ADD HL, SP"),
-            0x3A => self.not_implemented("LD A, (HL-)"),
+            0x3A => self.ld_r_rr(
+                mbc,
+                GeneralRegister::A,
+                CombinedRegister::HL,
+                Some(MemoryOffset::Minus),
+            ),
             0x3B => self.not_implemented("DEC SP"),
             0x3C => self.inc(GeneralRegister::A),
             0x3D => self.dec(GeneralRegister::A),
-            0x3E => self.ld_next_8(memory, GeneralRegister::A),
+            0x3E => self.ld_next_8(mbc, GeneralRegister::A),
             0x3F => self.not_implemented("CCF"),
             0x40 => self.ld(GeneralRegister::B, GeneralRegister::B),
             0x41 => self.ld(GeneralRegister::B, GeneralRegister::C),
@@ -508,13 +524,7 @@ impl SharpSM83 {
             0x43 => self.ld(GeneralRegister::B, GeneralRegister::E),
             0x44 => self.ld(GeneralRegister::B, GeneralRegister::H),
             0x45 => self.ld(GeneralRegister::B, GeneralRegister::L),
-            0x46 => {
-                self.set_register_from_memory(
-                    memory,
-                    GeneralRegister::D,
-                    self.registers.get_combined(CombinedRegister::HL),
-                );
-            }
+            0x46 => self.ld_r_rr(mbc, GeneralRegister::B, CombinedRegister::HL, None),
             0x47 => self.ld(GeneralRegister::B, GeneralRegister::A),
             0x48 => self.ld(GeneralRegister::C, GeneralRegister::B),
             0x49 => self.ld(GeneralRegister::C, GeneralRegister::C),
@@ -522,13 +532,7 @@ impl SharpSM83 {
             0x4B => self.ld(GeneralRegister::C, GeneralRegister::E),
             0x4C => self.ld(GeneralRegister::C, GeneralRegister::H),
             0x4D => self.ld(GeneralRegister::C, GeneralRegister::L),
-            0x4E => {
-                self.set_register_from_memory(
-                    memory,
-                    GeneralRegister::C,
-                    self.registers.get_combined(CombinedRegister::HL),
-                );
-            }
+            0x4E => self.ld_r_rr(mbc, GeneralRegister::C, CombinedRegister::HL, None),
             0x4F => self.ld(GeneralRegister::C, GeneralRegister::A),
             0x50 => self.ld(GeneralRegister::D, GeneralRegister::B),
             0x51 => self.ld(GeneralRegister::D, GeneralRegister::C),
@@ -536,13 +540,7 @@ impl SharpSM83 {
             0x53 => self.ld(GeneralRegister::D, GeneralRegister::E),
             0x54 => self.ld(GeneralRegister::D, GeneralRegister::H),
             0x55 => self.ld(GeneralRegister::D, GeneralRegister::L),
-            0x56 => {
-                self.set_register_from_memory(
-                    memory,
-                    GeneralRegister::D,
-                    self.registers.get_combined(CombinedRegister::HL),
-                );
-            }
+            0x56 => self.ld_r_rr(mbc, GeneralRegister::D, CombinedRegister::HL, None),
             0x57 => self.ld(GeneralRegister::D, GeneralRegister::A),
             0x58 => self.ld(GeneralRegister::E, GeneralRegister::B),
             0x59 => self.ld(GeneralRegister::E, GeneralRegister::C),
@@ -550,13 +548,7 @@ impl SharpSM83 {
             0x5B => self.ld(GeneralRegister::E, GeneralRegister::E),
             0x5C => self.ld(GeneralRegister::E, GeneralRegister::H),
             0x5D => self.ld(GeneralRegister::E, GeneralRegister::L),
-            0x5E => {
-                self.set_register_from_memory(
-                    memory,
-                    GeneralRegister::E,
-                    self.registers.get_combined(CombinedRegister::HL),
-                );
-            }
+            0x5E => self.ld_r_rr(mbc, GeneralRegister::E, CombinedRegister::HL, None),
             0x5F => self.ld(GeneralRegister::E, GeneralRegister::A),
             0x60 => self.ld(GeneralRegister::H, GeneralRegister::B),
             0x61 => self.ld(GeneralRegister::H, GeneralRegister::C),
@@ -564,13 +556,7 @@ impl SharpSM83 {
             0x63 => self.ld(GeneralRegister::H, GeneralRegister::E),
             0x64 => self.ld(GeneralRegister::H, GeneralRegister::H),
             0x65 => self.ld(GeneralRegister::H, GeneralRegister::L),
-            0x66 => {
-                self.set_register_from_memory(
-                    memory,
-                    GeneralRegister::H,
-                    self.registers.get_combined(CombinedRegister::HL),
-                );
-            }
+            0x66 => self.ld_r_rr(mbc, GeneralRegister::H, CombinedRegister::HL, None),
             0x67 => self.ld(GeneralRegister::H, GeneralRegister::A),
             0x68 => self.ld(GeneralRegister::L, GeneralRegister::B),
             0x69 => self.ld(GeneralRegister::L, GeneralRegister::C),
@@ -578,35 +564,23 @@ impl SharpSM83 {
             0x6B => self.ld(GeneralRegister::L, GeneralRegister::E),
             0x6C => self.ld(GeneralRegister::L, GeneralRegister::H),
             0x6D => self.ld(GeneralRegister::L, GeneralRegister::L),
-            0x6E => {
-                self.set_register_from_memory(
-                    memory,
-                    GeneralRegister::L,
-                    self.registers.get_combined(CombinedRegister::HL),
-                );
-            }
+            0x6E => self.ld_r_rr(mbc, GeneralRegister::L, CombinedRegister::HL, None),
             0x6F => self.ld(GeneralRegister::L, GeneralRegister::A),
-            0x70 => self.ld_to_hl(memory, GeneralRegister::B),
-            0x71 => self.ld_to_hl(memory, GeneralRegister::C),
-            0x72 => self.ld_to_hl(memory, GeneralRegister::D),
-            0x73 => self.ld_to_hl(memory, GeneralRegister::E),
-            0x74 => self.ld_to_hl(memory, GeneralRegister::H),
-            0x75 => self.ld_to_hl(memory, GeneralRegister::L),
+            0x70 => self.ld_to_hl(mbc, GeneralRegister::B),
+            0x71 => self.ld_to_hl(mbc, GeneralRegister::C),
+            0x72 => self.ld_to_hl(mbc, GeneralRegister::D),
+            0x73 => self.ld_to_hl(mbc, GeneralRegister::E),
+            0x74 => self.ld_to_hl(mbc, GeneralRegister::H),
+            0x75 => self.ld_to_hl(mbc, GeneralRegister::L),
             0x76 => self.not_implemented("HALT"),
-            0x77 => self.ld_to_hl(memory, GeneralRegister::A),
+            0x77 => self.ld_to_hl(mbc, GeneralRegister::A),
             0x78 => self.ld(GeneralRegister::A, GeneralRegister::B),
             0x79 => self.ld(GeneralRegister::A, GeneralRegister::C),
             0x7A => self.ld(GeneralRegister::A, GeneralRegister::D),
             0x7B => self.ld(GeneralRegister::A, GeneralRegister::E),
             0x7C => self.ld(GeneralRegister::A, GeneralRegister::H),
             0x7D => self.ld(GeneralRegister::A, GeneralRegister::L),
-            0x7E => {
-                self.set_register_from_memory(
-                    memory,
-                    GeneralRegister::A,
-                    self.registers.get_combined(CombinedRegister::HL),
-                );
-            }
+            0x7E => self.ld_r_rr(mbc, GeneralRegister::A, CombinedRegister::HL, None),
             0x7F => self.ld(GeneralRegister::A, GeneralRegister::A),
             0x80 => self.add(GeneralRegister::B),
             0x81 => self.add(GeneralRegister::C),
@@ -674,23 +648,23 @@ impl SharpSM83 {
             0xBF => self.not_implemented("CP A, A"),
             0xC0 => self.not_implemented("RET NZ"),
             0xC1 => self.not_implemented("POP BC"),
-            0xC2 => self.jp(memory, Some(FlagRegisterValue::NZ)),
-            0xC3 => self.jp(memory, None),
+            0xC2 => self.jp(mbc, Some(FlagRegisterValue::NZ)),
+            0xC3 => self.jp(mbc, None),
             0xC4 => self.not_implemented("CALL NZ, u16"),
             0xC5 => self.not_implemented("PUSH BC"),
             0xC6 => self.not_implemented("ADD A, u8"),
             0xC7 => self.not_implemented("RST 00h"),
             0xC8 => self.not_implemented("RET Z"),
             0xC9 => self.not_implemented("RET"),
-            0xCA => self.jp(memory, Some(FlagRegisterValue::Z)),
+            0xCA => self.jp(mbc, Some(FlagRegisterValue::Z)),
             0xCB => self.not_implemented("Prefixes ,)"),
             0xCC => self.not_implemented("CALL Z, u16"),
-            0xCD => self.call(memory),
+            0xCD => self.call(mbc),
             0xCE => self.not_implemented("ADC A, u8"),
             0xCF => self.not_implemented("RST 08h"),
             0xD0 => self.not_implemented("RET NC"),
             0xD1 => self.not_implemented("POP DE"),
-            0xD2 => self.jp(memory, Some(FlagRegisterValue::NC)),
+            0xD2 => self.jp(mbc, Some(FlagRegisterValue::NC)),
             0xD3 => (),
             0xD4 => self.not_implemented("CALL NC, u16"),
             0xD5 => self.not_implemented("PUSH DE"),
@@ -698,13 +672,13 @@ impl SharpSM83 {
             0xD7 => self.not_implemented("RST 10h"),
             0xD8 => self.not_implemented("RET C"),
             0xD9 => self.not_implemented("RETI"),
-            0xDA => self.jp(memory, Some(FlagRegisterValue::C)),
+            0xDA => self.jp(mbc, Some(FlagRegisterValue::C)),
             0xDB => (),
             0xDC => self.not_implemented("CALL C, u16"),
             0xDD => (),
             0xDE => self.not_implemented("SBC A, u8"),
             0xDF => self.not_implemented("RST 18h"),
-            0xE0 => self.not_implemented("ld (FF00+u8), A"),
+            0xE0 => self.not_implemented("LD (FF00+u8), A"),
             0xE1 => self.not_implemented("POP HL"),
             0xE2 => self.not_implemented("LD (FF00+C), A"),
             0xE3 => (),
@@ -741,5 +715,104 @@ impl SharpSM83 {
                 self.program_counter += 1;
             }
         }
+
+        if self.debug {
+            self.display_current_registers(op);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SharpSM83;
+    use crate::cpu_registers::GeneralRegister;
+
+    #[test]
+    fn inc_should_work() {
+        let mut cpu = SharpSM83::default();
+        cpu.inc(GeneralRegister::A);
+        let a_val = cpu.registers.get(GeneralRegister::A);
+
+        assert_eq!(a_val, 0x01);
+    }
+
+    #[test]
+    fn inc_should_wrap() {
+        let mut cpu = SharpSM83::default();
+        cpu.registers.set(GeneralRegister::A, 0xff);
+        cpu.inc(GeneralRegister::A);
+        let a_val = cpu.registers.get(GeneralRegister::A);
+
+        assert_eq!(a_val, 0x00);
+    }
+
+    #[test]
+    fn dec_should_work() {
+        let mut cpu = SharpSM83::default();
+        cpu.registers.set(GeneralRegister::A, 0x02);
+        cpu.dec(GeneralRegister::A);
+        let a_val = cpu.registers.get(GeneralRegister::A);
+
+        assert_eq!(a_val, 0x01);
+    }
+
+    #[test]
+    fn dec_should_wrap() {
+        let mut cpu = SharpSM83::default();
+        cpu.dec(GeneralRegister::A);
+        let a_val = cpu.registers.get(GeneralRegister::A);
+
+        assert_eq!(a_val, 0xff);
+    }
+
+    #[test]
+    fn add_should_work() {
+        let mut cpu = SharpSM83::default();
+        cpu.registers.set(GeneralRegister::B, 0x01);
+        cpu.add(GeneralRegister::B);
+        let a_val = cpu.registers.get(GeneralRegister::A);
+
+        assert_eq!(a_val, 0x01);
+    }
+
+    #[test]
+    fn add_should_wrap() {
+        let mut cpu = SharpSM83::default();
+        cpu.registers.set(GeneralRegister::A, 0xff);
+        cpu.registers.set(GeneralRegister::B, 0x01);
+        cpu.add(GeneralRegister::B);
+        let a_val = cpu.registers.get(GeneralRegister::A);
+
+        assert_eq!(a_val, 0x00);
+    }
+
+    #[test]
+    fn sub_should_work() {
+        let mut cpu = SharpSM83::default();
+        cpu.registers.set(GeneralRegister::A, 0x02);
+        cpu.registers.set(GeneralRegister::B, 0x01);
+        cpu.sub(GeneralRegister::B);
+        let a_val = cpu.registers.get(GeneralRegister::A);
+
+        assert_eq!(a_val, 0x01);
+    }
+
+    #[test]
+    fn sub_should_wrap() {
+        let mut cpu = SharpSM83::default();
+        cpu.registers.set(GeneralRegister::B, 0x01);
+        cpu.sub(GeneralRegister::B);
+        let a_val = cpu.registers.get(GeneralRegister::A);
+
+        assert_eq!(a_val, 0xff);
+    }
+
+    #[test]
+    fn ld_should_work() {
+        let mut cpu = SharpSM83::default();
+        cpu.registers.set(GeneralRegister::A, 0x01);
+        cpu.ld(GeneralRegister::B, GeneralRegister::A);
+
+        assert_eq!(cpu.registers.get(GeneralRegister::B), 0x01);
     }
 }

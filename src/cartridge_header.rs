@@ -15,6 +15,8 @@ const SGB_FLAG_LOCATION: usize = 0x146;
 const ROM_SIZE_LOCATION: usize = 0x148;
 const RAM_SIZE_LOCATION: usize = 0x149;
 
+const RAM_BANK_SIZE: usize = 0x8000;
+
 fn buffer_slice_to_string(buffer: &[u8]) -> String {
     let mut visible = String::new();
 
@@ -88,19 +90,19 @@ pub struct RamSpec {
 fn read_ram_size(buffer: &[u8]) -> Option<RamSpec> {
     match buffer[RAM_SIZE_LOCATION] {
         0x02 => Some(RamSpec {
-            size: 0x8000,
+            size: RAM_BANK_SIZE,
             banks: 1,
         }),
         0x03 => Some(RamSpec {
-            size: 0x8000,
+            size: RAM_BANK_SIZE,
             banks: 4,
         }),
         0x04 => Some(RamSpec {
-            size: 0x8000,
+            size: RAM_BANK_SIZE,
             banks: 16,
         }),
         0x05 => Some(RamSpec {
-            size: 0x8000,
+            size: RAM_BANK_SIZE,
             banks: 8,
         }),
         _ => None,
