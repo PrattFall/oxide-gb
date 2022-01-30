@@ -45,7 +45,7 @@ fn main() -> io::Result<()> {
     let mut memory = make_controller(cartridge);
     let mut cpu = sm83::SharpSM83::default();
 
-    cpu.program_counter = 0x100;
+    cpu.program_counter = 0x00;
     cpu.debug = true;
 
     loop {

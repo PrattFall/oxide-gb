@@ -90,6 +90,18 @@ impl Registers {
             self.get(GeneralRegister::F).unset_flag(flag),
         )
     }
+
+    pub fn set_half_carry(&mut self, should_set: bool) {
+        if should_set {
+            self.set_flag(FlagRegisterValue::H);
+        } else {
+            self.unset_flag(FlagRegisterValue::H);
+        }
+    }
+
+    pub fn is_flag_set(&self, flag: FlagRegisterValue) -> bool {
+        self.get(GeneralRegister::F).contains_flag(flag)
+    }
 }
 
 impl Default for Registers {

@@ -1,10 +1,20 @@
 // use bitflags::bitflags;
+use crate::utils::u8s_to_u16;
 
 pub const ROM_BANK_SIZE: usize = 16000;
 
 pub trait MemoryBankController {
     fn write_memory(&mut self, location: usize, value: u8);
     fn read_memory(&self, location: usize) -> u8;
+    fn get_next_u8(&self, from_location: usize) -> u8 {
+        self.read_memory(from_location + 1)
+    }
+    fn get_next_u16(&self, from_location: usize) -> u16 {
+        u8s_to_u16(
+            self.read_memory(from_location + 1),
+            self.read_memory(from_location + 2),
+        )
+    }
 }
 
 pub struct BankedMemory {

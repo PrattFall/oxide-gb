@@ -2,6 +2,10 @@ pub fn add_should_half_carry(a: u8, b: u8) -> bool {
     ((a & 0xf) + (b & 0xf) & 0x10) == 0x10
 }
 
+pub fn add_16_should_half_carry(a: u16, b: u16) -> bool {
+    (a & 0xfff) + (b & 0xfff) > 0xfff
+}
+
 pub fn sub_should_half_carry(a: u8, b: u8) -> bool {
     (a & 0xf) < (b & 0xf)
 }
