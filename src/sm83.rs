@@ -542,6 +542,8 @@ impl SharpSM83 {
                 self.program_counter, value, result
             );
         }
+
+        self.program_counter += 1;
     }
 
     fn rlc(&mut self, value: u8) -> u8 {
