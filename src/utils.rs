@@ -1,3 +1,11 @@
+#[derive(PartialEq, Eq)]
+pub enum Mode {
+    Debug,
+    Production,
+}
+
+pub const MODE: Mode = Mode::Debug;
+
 pub fn add_should_half_carry(a: u8, b: u8) -> bool {
     ((a & 0xf) + (b & 0xf) & 0x10) == 0x10
 }
