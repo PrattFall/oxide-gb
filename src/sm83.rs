@@ -516,14 +516,10 @@ impl SharpSM83 {
         self.program_counter += 1;
     }
 
-    fn rotate_left(value: u8) -> u8 {
-        (value << 1) | value.wrapping_shr(7)
-    }
-
     // specialized from rlc because the flags are set differently
     fn rlca(&mut self) {
         let value = self.registers.get(GeneralRegister::A);
-        let result = SharpSM83::rotate_left(value);
+        let result = value.rotate_left(1);
         self.registers.set(GeneralRegister::A, result);
 
         if bit_set_at(7, value) {
@@ -547,7 +543,7 @@ impl SharpSM83 {
     }
 
     fn rlc(&mut self, value: u8) -> u8 {
-        let result = SharpSM83::rotate_left(value);
+        let result = value.rotate_left(1);
 
         if bit_set_at(7, value) {
             self.registers.set_flag(FlagRegisterValue::C);

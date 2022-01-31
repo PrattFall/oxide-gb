@@ -34,6 +34,10 @@ pub fn reset_bit(location: u8, value: u8) -> u8 {
     value & !(1 << location)
 }
 
+pub fn set_bit(location: u8, value: u8) -> u8 {
+    value | (1 << location)
+}
+
 #[cfg(test)]
 mod tests {
     use crate::utils::add_should_half_carry;
