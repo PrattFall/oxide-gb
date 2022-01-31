@@ -26,6 +26,14 @@ pub fn u16_to_u8s(value: u16) -> [u8; 2] {
     [(value >> 8) as u8, value as u8]
 }
 
+pub fn bit_set_at(location: u8, value: u8) -> bool {
+    value & (1 << location) != 0
+}
+
+pub fn reset_bit(location: u8, value: u8) -> u8 {
+    value & !(1 << location)
+}
+
 #[cfg(test)]
 mod tests {
     use crate::utils::add_should_half_carry;

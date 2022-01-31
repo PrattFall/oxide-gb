@@ -102,6 +102,20 @@ impl Registers {
     pub fn is_flag_set(&self, flag: FlagRegisterValue) -> bool {
         self.get(GeneralRegister::F).contains_flag(flag)
     }
+
+    pub fn display(&self) -> String {
+        format!(
+            "A {:#04x}, B {:#04x}, C {:#04x}, D {:#04x}, E {:#04x}, F {:#04x}, H {:#04x}, L {:#04x}",
+            self.get(GeneralRegister::A),
+            self.get(GeneralRegister::B),
+            self.get(GeneralRegister::C),
+            self.get(GeneralRegister::D),
+            self.get(GeneralRegister::E),
+            self.get(GeneralRegister::F),
+            self.get(GeneralRegister::H),
+            self.get(GeneralRegister::L),
+        )
+    }
 }
 
 impl Default for Registers {
