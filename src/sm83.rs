@@ -40,9 +40,8 @@ impl SharpSM83 {
     fn cp_val(&mut self, value: u8) {
         let a_val = self.registers.get(GeneralRegister::A);
 
-        if a_val.wrapping_sub(value) == 0 {
-            self.registers.set_flag(FlagRegisterValue::Z);
-        }
+        self.registers
+            .toggle_flag(FlagRegisterValue::Z, a_val.wrapping_sub(value) == 0);
     }
 
     fn cp_memory<T: MemoryBankController + ?Sized>(&mut self, mbc: &mut T, location: usize) {
@@ -96,13 +95,19 @@ impl SharpSM83 {
 
     fn inc(&mut self, register: GeneralRegister) {
         let register_value = self.registers.get(register);
+        let result = register_value.wrapping_add(1);
 
         self.registers.unset_flag(FlagRegisterValue::N);
 
         self.registers
-            .set_half_carry(add_should_half_carry(self.registers.get(register), 1));
+            .toggle_flag(FlagRegisterValue::Z, result == 0);
 
-        self.registers.set(register, register_value.wrapping_add(1));
+        self.registers.toggle_flag(
+            FlagRegisterValue::H,
+            add_should_half_carry(self.registers.get(register), 1),
+        );
+
+        self.registers.set(register, result);
 
         if MODE == Mode::Debug {
             println!(
@@ -252,8 +257,10 @@ impl SharpSM83 {
 
         self.registers.set_flag(FlagRegisterValue::N);
 
-        self.registers
-            .set_half_carry(sub_should_half_carry(register_value, 1));
+        self.registers.toggle_flag(
+            FlagRegisterValue::H,
+            sub_should_half_carry(register_value, 1),
+        );
 
         self.registers.set(register, result);
 
@@ -268,16 +275,14 @@ impl SharpSM83 {
 
         self.registers.unset_flag(FlagRegisterValue::N);
 
-        if 0xff - a_value < value {
-            self.registers.set_flag(FlagRegisterValue::C);
-        }
+        self.registers
+            .toggle_flag(FlagRegisterValue::C, 0xff - a_value < value);
 
         self.registers
-            .set_half_carry(add_should_half_carry(a_value, value));
+            .toggle_flag(FlagRegisterValue::H, add_should_half_carry(a_value, value));
 
-        if result == 0 {
-            self.registers.set_flag(FlagRegisterValue::Z);
-        }
+        self.registers
+            .toggle_flag(FlagRegisterValue::Z, result == 0);
     }
 
     fn add_register(&mut self, register: GeneralRegister) {
@@ -320,12 +325,13 @@ impl SharpSM83 {
 
         self.registers.unset_flag(FlagRegisterValue::N);
 
-        self.registers
-            .set_half_carry(add_16_should_half_carry(hl_val, value));
+        self.registers.toggle_flag(
+            FlagRegisterValue::H,
+            add_16_should_half_carry(hl_val, value),
+        );
 
-        if 0xffff - hl_val < value {
-            self.registers.set_flag(FlagRegisterValue::C);
-        }
+        self.registers
+            .toggle_flag(FlagRegisterValue::C, 0xffff - hl_val < value);
     }
 
     fn add_combined_register(&mut self, register: CombinedRegister) {
@@ -377,16 +383,14 @@ impl SharpSM83 {
 
         self.registers.set_flag(FlagRegisterValue::N);
 
-        if r_val > a_val {
-            self.registers.set_flag(FlagRegisterValue::C);
-        }
+        self.registers
+            .toggle_flag(FlagRegisterValue::C, r_val > a_val);
 
         self.registers
-            .set_half_carry(sub_should_half_carry(a_val, r_val));
+            .toggle_flag(FlagRegisterValue::H, sub_should_half_carry(a_val, r_val));
 
-        if result == 0 {
-            self.registers.set_flag(FlagRegisterValue::Z);
-        }
+        self.registers
+            .toggle_flag(FlagRegisterValue::Z, result == 0);
 
         self.program_counter += 1;
     }
@@ -444,10 +448,10 @@ impl SharpSM83 {
         self.program_counter += 3;
     }
 
-    fn display_current_registers(&self, op: u8) {
+    fn display_current_registers(&self, program_counter: u16, op: u8) {
         println!(
             "{:#06x}: ({:#04x}) {}",
-            self.program_counter,
+            program_counter,
             op,
             self.registers.display()
         );
@@ -545,17 +549,11 @@ impl SharpSM83 {
     fn rlc(&mut self, value: u8) -> u8 {
         let result = value.rotate_left(1);
 
-        if bit_set_at(7, value) {
-            self.registers.set_flag(FlagRegisterValue::C);
-        } else {
-            self.registers.unset_flag(FlagRegisterValue::C);
-        }
+        self.registers
+            .toggle_flag(FlagRegisterValue::C, bit_set_at(7, value));
 
-        if result == 0 {
-            self.registers.set_flag(FlagRegisterValue::Z);
-        } else {
-            self.registers.unset_flag(FlagRegisterValue::Z);
-        }
+        self.registers
+            .toggle_flag(FlagRegisterValue::Z, result == 0);
 
         self.registers.unset_flag(FlagRegisterValue::H);
         self.registers.unset_flag(FlagRegisterValue::N);
@@ -595,11 +593,7 @@ impl SharpSM83 {
     fn bit(&mut self, bit: u8, value: u8) -> bool {
         let result = bit_set_at(bit, value);
 
-        if result {
-            self.registers.unset_flag(FlagRegisterValue::Z);
-        } else {
-            self.registers.set_flag(FlagRegisterValue::Z);
-        }
+        self.registers.toggle_flag(FlagRegisterValue::Z, !result);
 
         self.registers.unset_flag(FlagRegisterValue::N);
         self.registers.set_flag(FlagRegisterValue::H);
@@ -609,7 +603,6 @@ impl SharpSM83 {
 
     fn bit_register(&mut self, bit: u8, register: GeneralRegister) {
         let value = self.registers.get(register);
-
         let result = self.bit(bit, value);
 
         if MODE == Mode::Debug {
@@ -622,7 +615,6 @@ impl SharpSM83 {
 
     fn bit_memory<T: MemoryBankController + ?Sized>(&mut self, bit: u8, mbc: &T) {
         let value = mbc.read_memory(self.registers.get_combined(CombinedRegister::HL).into());
-
         let result = self.bit(bit, value);
 
         if MODE == Mode::Debug {
@@ -816,6 +808,7 @@ impl SharpSM83 {
     }
 
     pub fn apply_operation<T: MemoryBankController + ?Sized>(&mut self, mbc: &mut T) {
+        let program_counter = self.program_counter;
         let op = mbc.read_memory(self.program_counter.into());
 
         match op {
@@ -1116,7 +1109,7 @@ impl SharpSM83 {
         }
 
         if MODE == Mode::Debug {
-            self.display_current_registers(op);
+            self.display_current_registers(program_counter, op);
         }
     }
 }
