@@ -22,6 +22,17 @@ pub enum CombinedRegister {
     HL,
 }
 
+const ALL_REGISTERS: [GeneralRegister; 8] = [
+    GeneralRegister::A,
+    GeneralRegister::F,
+    GeneralRegister::B,
+    GeneralRegister::C,
+    GeneralRegister::D,
+    GeneralRegister::E,
+    GeneralRegister::H,
+    GeneralRegister::L,
+];
+
 pub struct Registers {
     registers: HashMap<GeneralRegister, u8>,
 }
@@ -91,11 +102,11 @@ impl Registers {
         )
     }
 
-    pub fn set_half_carry(&mut self, should_set: bool) {
+    pub fn toggle_flag(&mut self, flag: FlagRegisterValue, should_set: bool) {
         if should_set {
-            self.set_flag(FlagRegisterValue::H);
+            self.set_flag(flag);
         } else {
-            self.unset_flag(FlagRegisterValue::H);
+            self.unset_flag(flag);
         }
     }
 
@@ -104,33 +115,16 @@ impl Registers {
     }
 
     pub fn display(&self) -> String {
-        format!(
-            "A {:#04x}, B {:#04x}, C {:#04x}, D {:#04x}, E {:#04x}, F {:#04x}, H {:#04x}, L {:#04x}",
-            self.get(GeneralRegister::A),
-            self.get(GeneralRegister::B),
-            self.get(GeneralRegister::C),
-            self.get(GeneralRegister::D),
-            self.get(GeneralRegister::E),
-            self.get(GeneralRegister::F),
-            self.get(GeneralRegister::H),
-            self.get(GeneralRegister::L),
-        )
+        ALL_REGISTERS
+            .map(|r| format!("{:?} {:#04x}", r, self.get(r)))
+            .join(", ")
     }
 }
 
 impl Default for Registers {
     fn default() -> Self {
         Registers {
-            registers: HashMap::from([
-                (GeneralRegister::A, 0),
-                (GeneralRegister::F, 0),
-                (GeneralRegister::B, 0),
-                (GeneralRegister::C, 0),
-                (GeneralRegister::D, 0),
-                (GeneralRegister::E, 0),
-                (GeneralRegister::H, 0),
-                (GeneralRegister::L, 0),
-            ]),
+            registers: HashMap::from(ALL_REGISTERS.map(|r| (r, 0))),
         }
     }
 }
