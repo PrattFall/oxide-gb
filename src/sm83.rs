@@ -138,17 +138,114 @@ impl SharpSM83 {
     }
 
     fn ld(&mut self, a: GeneralRegister, b: GeneralRegister) {
+        let value = self.registers.get(b);
+
         if MODE == Mode::Debug {
             println!(
                 "{:#06x}: Loading {:#04x} from Register {:?} to Register {:?}",
-                self.program_counter,
-                self.registers.get(b),
-                b,
-                a
+                self.program_counter, value, b, a
             );
         }
 
-        self.registers.set(a, self.registers.get(b));
+        self.registers.set(a, value);
+
+        self.program_counter += 1;
+    }
+
+    fn ld_next_8<T: MemoryBankController + ?Sized>(
+        &mut self,
+        mbc: &mut T,
+        register: GeneralRegister,
+    ) {
+        let value = mbc.get_next_u8(self.program_counter.into());
+
+        if MODE == Mode::Debug {
+            println!(
+                "{:#06x}: Loading {:#06x} to Register {:?}",
+                self.program_counter, value, register
+            );
+        }
+
+        self.registers.set(register, value);
+
+        self.program_counter += 2;
+    }
+
+    fn ld_next_16<T: MemoryBankController + ?Sized>(
+        &mut self,
+        mbc: &mut T,
+        register: CombinedRegister,
+    ) {
+        let value = mbc.get_next_u16(self.program_counter.into());
+
+        if MODE == Mode::Debug {
+            println!(
+                "{:#06x}: Loading {:#06x} to Register {:?}",
+                self.program_counter, value, register
+            );
+        }
+
+        self.registers.set_combined(register, value);
+
+        self.program_counter += 3;
+    }
+
+    fn ld_to_sp<T: MemoryBankController + ?Sized>(&mut self, mbc: &mut T) {
+        let value = mbc.get_next_u16(self.program_counter.into());
+
+        if MODE == Mode::Debug {
+            println!(
+                "{:#06x}: Loading value {:#06x} into Stack Pointer",
+                self.program_counter, value
+            );
+        }
+
+        self.stack_pointer = value;
+
+        self.program_counter += 3;
+    }
+
+    fn ld_rr_r<T: MemoryBankController + ?Sized>(
+        &mut self,
+        mbc: &mut T,
+        location: CombinedRegister,
+        register: GeneralRegister,
+        offset: Option<MemoryOffset>,
+    ) {
+        let value = self.registers.get(register);
+
+        if MODE == Mode::Debug {
+            println!(
+                "{:#06x}: Loading {:#04x} from Register {:?} to ({:?})",
+                self.program_counter, value, register, location,
+            );
+        }
+
+        let memory_location = self.read_memory_with_offset(location, offset);
+
+        mbc.write_memory(memory_location.into(), value);
+
+        self.program_counter += 1;
+    }
+
+    fn ld_r_rr<T: MemoryBankController + ?Sized>(
+        &mut self,
+        mbc: &mut T,
+        register: GeneralRegister,
+        location: CombinedRegister,
+        offset: Option<MemoryOffset>,
+    ) {
+        let memory_location = self.read_memory_with_offset(location, offset);
+        let value = mbc.read_memory(memory_location.into());
+
+        if MODE == Mode::Debug {
+            println!(
+                "{:#06x}: Loading {:#04x} from Location ({:?}) to {:?}",
+                self.program_counter, value, memory_location, register,
+            );
+        }
+
+        self.registers.set(register, value);
 
         self.program_counter += 1;
     }
@@ -364,88 +461,92 @@ impl SharpSM83 {
         self.program_counter += 1;
     }
 
-    fn sub(&mut self, register: GeneralRegister) {
+    fn sub(&mut self, value: u8) {
         let a_val = self.registers.get(GeneralRegister::A);
-        let r_val = self.registers.get(register);
-        let result = a_val.wrapping_sub(r_val);
+        let result = a_val.wrapping_sub(value);
 
         self.registers.set(GeneralRegister::A, result);
-
-        if MODE == Mode::Debug {
-            println!(
-                "{:#06x}: Subtracting Register {:?}'s value ({:#04x}) from Register A ({:#04x})",
-                self.program_counter,
-                register,
-                self.registers.get(register),
-                self.registers.get(GeneralRegister::A)
-            );
-        }
 
         self.registers.set_flag(FlagRegisterValue::N);
 
         self.registers
-            .toggle_flag(FlagRegisterValue::C, r_val > a_val);
+            .toggle_flag(FlagRegisterValue::C, value > a_val);
 
         self.registers
-            .toggle_flag(FlagRegisterValue::H, sub_should_half_carry(a_val, r_val));
+            .toggle_flag(FlagRegisterValue::H, sub_should_half_carry(a_val, value));
 
         self.registers
             .toggle_flag(FlagRegisterValue::Z, result == 0);
+    }
+
+    fn sub_register(&mut self, register: GeneralRegister) {
+        let value = self.registers.get(register);
+
+        if MODE == Mode::Debug {
+            let a_val = self.registers.get(GeneralRegister::A);
+            println!(
+                "{:#06x}: Subtracting Register {:?}'s value ({:#04x}) from Register A ({:#04x})",
+                self.program_counter, register, value, a_val
+            );
+        }
+
+        self.sub(value);
 
         self.program_counter += 1;
     }
 
-    fn ld_next_8<T: MemoryBankController + ?Sized>(
-        &mut self,
-        mbc: &mut T,
-        register: GeneralRegister,
-    ) {
-        let loaded_value = mbc.get_next_u8(self.program_counter.into());
+    fn sub_hl<T: MemoryBankController + ?Sized>(&mut self, mbc: &T) {
+        let value = mbc.read_memory(usize::from(
+            self.registers.get_combined(CombinedRegister::HL),
+        ));
 
         if MODE == Mode::Debug {
+            let a_val = self.registers.get(GeneralRegister::A);
             println!(
-                "{:#06x}: Loading {:#06x} to Register {:?}",
-                self.program_counter, loaded_value, register
+                "{:#06x}: Subtracting Memory Location (HL)'s value ({:#04x}) from Register A ({:#04x})",
+                self.program_counter, value, a_val
             );
         }
 
-        self.registers.set(register, loaded_value);
+        self.sub(value);
 
-        self.program_counter += 2;
+        self.program_counter += 1;
     }
 
-    fn ld_next_16<T: MemoryBankController + ?Sized>(
-        &mut self,
-        mbc: &mut T,
-        register: CombinedRegister,
-    ) {
-        let loaded_value = mbc.get_next_u16(self.program_counter.into());
+    fn sbc_register(&mut self, register: GeneralRegister) {
+        let value = self.registers.get(register);
+        let cy = self.registers.is_flag_set(FlagRegisterValue::C) as u8;
 
         if MODE == Mode::Debug {
+            let a_val = self.registers.get(GeneralRegister::A);
             println!(
-                "{:#06x}: Loading {:#06x} to Register {:?}",
-                self.program_counter, loaded_value, register
+                "{:#06x}: Subtracting Register {:?}'s value + CY Flag ({:#04x}) from Register A ({:#04x})",
+                self.program_counter, register, value, a_val
             );
         }
 
-        self.registers.set_combined(register, loaded_value);
+        self.sub(value + cy);
 
-        self.program_counter += 3;
+        self.program_counter += 1;
     }
 
-    fn ld_to_sp<T: MemoryBankController + ?Sized>(&mut self, mbc: &mut T) {
-        let loaded_value = mbc.get_next_u16(self.program_counter.into());
+    fn sbc_hl<T: MemoryBankController + ?Sized>(&mut self, mbc: &T) {
+        let value = mbc.read_memory(usize::from(
+            self.registers.get_combined(CombinedRegister::HL),
+        ));
+        let cy = self.registers.is_flag_set(FlagRegisterValue::C) as u8;
 
         if MODE == Mode::Debug {
+            let a_val = self.registers.get(GeneralRegister::A);
             println!(
-                "{:#06x}: Loading value {:#06x} into Stack Pointer",
-                self.program_counter, loaded_value
+                "{:#06x}: Subtracting Memory Location (HL)'s value + CY Flag ({:#04x}) from Register A ({:#04x})",
+                self.program_counter, value, a_val
             );
         }
 
-        self.stack_pointer = loaded_value;
+        self.sub(value + cy);
 
-        self.program_counter += 3;
+        self.program_counter += 1;
     }
 
     fn display_current_registers(&self, program_counter: u16, op: u8) {
@@ -469,55 +570,6 @@ impl SharpSM83 {
             Some(MemoryOffset::Plus) => memory_loc.wrapping_add(1),
             Some(MemoryOffset::Minus) => memory_loc.wrapping_sub(1),
         }
-    }
-
-    fn ld_rr_r<T: MemoryBankController + ?Sized>(
-        &mut self,
-        mbc: &mut T,
-        location: CombinedRegister,
-        register: GeneralRegister,
-        offset: Option<MemoryOffset>,
-    ) {
-        if MODE == Mode::Debug {
-            println!(
-                "{:#06x}: Loading {:#04x} from Register {:?} to ({:?})",
-                self.program_counter,
-                self.registers.get(register),
-                register,
-                location,
-            );
-        }
-
-        let memory_location = self.read_memory_with_offset(location, offset);
-
-        mbc.write_memory(memory_location.into(), self.registers.get(register));
-
-        self.program_counter += 1;
-    }
-
-    fn ld_r_rr<T: MemoryBankController + ?Sized>(
-        &mut self,
-        mbc: &mut T,
-        register: GeneralRegister,
-        location: CombinedRegister,
-        offset: Option<MemoryOffset>,
-    ) {
-        if MODE == Mode::Debug {
-            println!(
-                "{:#06x}: Loading {:#04x} from Location ({:?}) to {:?}",
-                self.program_counter,
-                self.registers.get(register),
-                location,
-                register,
-            );
-        }
-
-        let memory_location = self.read_memory_with_offset(location, offset);
-
-        self.registers
-            .set(register, mbc.read_memory(memory_location.into()));
-
-        self.program_counter += 1;
     }
 
     // specialized from rlc because the flags are set differently
@@ -985,22 +1037,22 @@ impl SharpSM83 {
             0x8E => self.not_implemented("ADC A, (HL)"),
             0x8F => self.not_implemented("ADC A, A"),
 
-            0x90 => self.sub(GeneralRegister::B),
-            0x91 => self.sub(GeneralRegister::C),
-            0x92 => self.sub(GeneralRegister::D),
-            0x93 => self.sub(GeneralRegister::E),
-            0x94 => self.sub(GeneralRegister::H),
-            0x95 => self.sub(GeneralRegister::L),
-            0x96 => self.not_implemented("SUB A, (HL)"),
-            0x97 => self.sub(GeneralRegister::A),
-            0x98 => self.not_implemented("SBC A, B"),
-            0x99 => self.not_implemented("SBC A, C"),
-            0x9A => self.not_implemented("SBC A, D"),
-            0x9B => self.not_implemented("SBC A, E"),
-            0x9C => self.not_implemented("SBC A, H"),
-            0x9D => self.not_implemented("SBC A, L"),
-            0x9E => self.not_implemented("SBC A, (HL)"),
-            0x9F => self.not_implemented("SBC A, A"),
+            0x90 => self.sub_register(GeneralRegister::B),
+            0x91 => self.sub_register(GeneralRegister::C),
+            0x92 => self.sub_register(GeneralRegister::D),
+            0x93 => self.sub_register(GeneralRegister::E),
+            0x94 => self.sub_register(GeneralRegister::H),
+            0x95 => self.sub_register(GeneralRegister::L),
+            0x96 => self.sub_hl(mbc),
+            0x97 => self.sub_register(GeneralRegister::A),
+            0x98 => self.sbc_register(GeneralRegister::B),
+            0x99 => self.sbc_register(GeneralRegister::C),
+            0x9A => self.sbc_register(GeneralRegister::D),
+            0x9B => self.sbc_register(GeneralRegister::E),
+            0x9C => self.sbc_register(GeneralRegister::H),
+            0x9D => self.sbc_register(GeneralRegister::L),
+            0x9E => self.sbc_hl(mbc),
+            0x9F => self.sbc_register(GeneralRegister::A),
 
             0xA0 => self.not_implemented("AND A, B"),
             0xA1 => self.not_implemented("AND A, C"),
@@ -1183,7 +1235,7 @@ mod tests {
         let mut cpu = SharpSM83::default();
         cpu.registers.set(GeneralRegister::A, 0x02);
         cpu.registers.set(GeneralRegister::B, 0x01);
-        cpu.sub(GeneralRegister::B);
+        cpu.sub_register(GeneralRegister::B);
         let a_val = cpu.registers.get(GeneralRegister::A);
 
         assert_eq!(a_val, 0x01);
@@ -1193,7 +1245,7 @@ mod tests {
     fn sub_should_wrap() {
         let mut cpu = SharpSM83::default();
         cpu.registers.set(GeneralRegister::B, 0x01);
-        cpu.sub(GeneralRegister::B);
+        cpu.sub_register(GeneralRegister::B);
         let a_val = cpu.registers.get(GeneralRegister::A);
 
         assert_eq!(a_val, 0xff);

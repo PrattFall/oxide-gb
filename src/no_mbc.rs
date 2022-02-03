@@ -43,7 +43,7 @@ impl MemoryBankController for NoMBC {
             0xffff => self.interrupt_enable_register = value,
 
             _ => {
-                panic!("Cannot write to memory location {}", location);
+                println!("Cannot write to memory location {:#06x}", location);
             }
         }
     }
@@ -60,7 +60,7 @@ impl MemoryBankController for NoMBC {
             0xc000..=0xdfff => self.work_ram[location - 0xc000],
             0xe000..=0xfdff => self.work_ram[location - 0xe000],
             0xfe00..=0xfe9f => self.sprite_attribute_table[location - 0xfe00],
-            0xfea0..=0xfeff => panic!("Unusable"),
+            0xfea0..=0xfeff => panic!("Ram Banks between 0xfea0 and 0xfeff are unusable"),
             0xff00..=0xff7f => self.io_registers[location - 0xff00],
             0xff80..=0xfffe => self.high_ram[location - 0xff80],
             0xffff => self.interrupt_enable_register,
