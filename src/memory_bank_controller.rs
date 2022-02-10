@@ -11,8 +11,8 @@ pub trait MemoryBankController {
     }
     fn get_next_u16(&self, from_location: usize) -> u16 {
         u8s_to_u16(
-            self.read_memory(from_location + 1),
             self.read_memory(from_location + 2),
+            self.read_memory(from_location + 1),
         )
     }
 }

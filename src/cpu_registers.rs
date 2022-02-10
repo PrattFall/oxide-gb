@@ -1,5 +1,5 @@
-use crate::flag_register::{FlagRegister, FlagRegisterValue};
-use crate::utils::{u16_to_u8s, u8s_to_u16};
+use crate::flag_register::FlagRegisterValue;
+use crate::utils::{u16_to_u8s, u8s_to_u16, BitWise};
 use std::collections::HashMap;
 
 #[derive(Hash, PartialEq, Eq, Debug, Clone, Copy)]
@@ -31,6 +31,13 @@ const ALL_REGISTERS: [GeneralRegister; 8] = [
     GeneralRegister::E,
     GeneralRegister::H,
     GeneralRegister::L,
+];
+
+const ALL_COMBINED: [CombinedRegister; 4] = [
+    CombinedRegister::AF,
+    CombinedRegister::BC,
+    CombinedRegister::DE,
+    CombinedRegister::HL,
 ];
 
 pub struct Registers {
@@ -91,14 +98,14 @@ impl Registers {
     pub fn set_flag(&mut self, flag: FlagRegisterValue) {
         self.set(
             GeneralRegister::F,
-            self.get(GeneralRegister::F).set_flag(flag),
+            self.get(GeneralRegister::F).set_bit(flag as u8),
         );
     }
 
     pub fn unset_flag(&mut self, flag: FlagRegisterValue) {
         self.set(
             GeneralRegister::F,
-            self.get(GeneralRegister::F).unset_flag(flag),
+            self.get(GeneralRegister::F).unset_bit(flag as u8),
         )
     }
 
@@ -111,12 +118,18 @@ impl Registers {
     }
 
     pub fn is_flag_set(&self, flag: FlagRegisterValue) -> bool {
-        self.get(GeneralRegister::F).contains_flag(flag)
+        self.get(GeneralRegister::F).is_bit_set(flag as u8)
     }
 
     pub fn display(&self) -> String {
         ALL_REGISTERS
             .map(|r| format!("{:?} {:#04x}", r, self.get(r)))
+            .join(", ")
+    }
+
+    pub fn display_combined(&self) -> String {
+        ALL_COMBINED
+            .map(|r| format!("{:?} {:04x}", r, self.get_combined(r)))
             .join(", ")
     }
 }

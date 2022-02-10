@@ -1,10 +1,12 @@
+use num;
+
 #[derive(PartialEq, Eq)]
 pub enum Mode {
     Debug,
     Production,
 }
 
-pub const MODE: Mode = Mode::Debug;
+pub const MODE: Mode = Mode::Production;
 
 pub fn add_should_half_carry(a: u8, b: u8) -> bool {
     ((a & 0xf) + (b & 0xf) & 0x10) == 0x10
@@ -26,16 +28,24 @@ pub fn u16_to_u8s(value: u16) -> [u8; 2] {
     [(value >> 8) as u8, value as u8]
 }
 
-pub fn bit_set_at(location: u8, value: u8) -> bool {
-    value & (1 << location) != 0
+pub trait BitWise<T: num::Integer> {
+    fn is_bit_set(&self, bit: T) -> bool;
+    fn set_bit(&self, bit: T) -> T;
+    fn unset_bit(&self, bit: T) -> T;
 }
 
-pub fn reset_bit(location: u8, value: u8) -> u8 {
-    value & !(1 << location)
-}
+impl BitWise<u8> for u8 {
+    fn is_bit_set(&self, location: u8) -> bool {
+        self & location != 0
+    }
 
-pub fn set_bit(location: u8, value: u8) -> u8 {
-    value | (1 << location)
+    fn set_bit(&self, location: u8) -> u8 {
+        self | location
+    }
+
+    fn unset_bit(&self, location: u8) -> u8 {
+        self & !location
+    }
 }
 
 #[cfg(test)]

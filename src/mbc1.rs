@@ -1,4 +1,5 @@
 use crate::cartridge::Cartridge;
+use crate::cartridge_header::RAM_BANK_SIZE;
 use crate::memory_bank_controller::{BankedMemory, MemoryBankController, ROM_BANK_SIZE};
 
 pub struct MBC1 {
@@ -22,7 +23,7 @@ impl From<Cartridge> for MBC1 {
             ram: match cartridge.header.ram_size {
                 Some(ram_size) => BankedMemory {
                     active_bank: 0,
-                    banks: vec![vec![0; ram_size.size]; ram_size.banks],
+                    banks: vec![vec![0; RAM_BANK_SIZE]; ram_size.into()],
                 },
                 None => BankedMemory {
                     active_bank: 0,

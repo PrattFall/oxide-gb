@@ -2,8 +2,8 @@ use crate::cpu_registers::{CombinedRegister, GeneralRegister, Registers};
 use crate::flag_register::FlagRegisterValue;
 use crate::memory_bank_controller::MemoryBankController;
 use crate::utils::{
-    add_16_should_half_carry, add_should_half_carry, bit_set_at, reset_bit, sub_should_half_carry,
-    u16_to_u8s, Mode, MODE,
+    add_16_should_half_carry, add_should_half_carry, sub_should_half_carry, u16_to_u8s, BitWise,
+    Mode, MODE,
 };
 
 // const CLOCK_MHZ: f64 = 4.194304;
@@ -13,6 +13,8 @@ pub struct SharpSM83 {
     pub program_counter: u16,
     pub stack_pointer: u16,
     pub registers: Registers,
+    pub interrupts_enabled: bool,
+    pub current_op: u8,
 }
 
 pub enum MemoryOffset {
@@ -21,20 +23,22 @@ pub enum MemoryOffset {
 }
 
 impl SharpSM83 {
+    fn nothing(&mut self) {
+        self.program_counter += 1;
+    }
+
     fn nop(&mut self) {
-        if MODE == Mode::Debug {
-            println!("{:#06x}: NOP", self.program_counter);
-        }
+        self.debug_op("NOP");
 
         self.program_counter += 1;
     }
 
     fn not_implemented(&mut self, message: &str) {
-        if MODE == Mode::Debug {
-            println!("{:#06x}: ******** TODO: {}", self.program_counter, message);
-        }
+        self.debug_op(&format!("######## TODO: {}", message));
 
-        self.program_counter += 1;
+        panic!("TODO: {}", message);
+
+        // self.program_counter += 1;
     }
 
     fn cp_val(&mut self, value: u8) {
@@ -49,10 +53,10 @@ impl SharpSM83 {
 
         if MODE == Mode::Debug {
             let a_val = self.registers.get(GeneralRegister::A);
-            println!(
-                "{:#06x}: Comparing Register A ({:#04x}) with value at location {:#06x} ({:#04x})",
-                self.program_counter, a_val, location, value
-            );
+            self.debug_op(&format!(
+                "Comparing Register A ({:#04x}) with value at location {:#06x} ({:#04x})",
+                a_val, location, value
+            ));
         }
 
         self.cp_val(value);
@@ -66,10 +70,10 @@ impl SharpSM83 {
         if MODE == Mode::Debug {
             let location = usize::from(self.program_counter + 1);
             let a_val = self.registers.get(GeneralRegister::A);
-            println!(
-                "{:#06x}: Comparing Register A ({:#04x}) with value at location {:#06x} ({:#04x})",
-                self.program_counter, a_val, location, value
-            );
+            self.debug_op(&format!(
+                "Comparing Register A ({:#04x}) with value at location {:#06x} ({:#04x})",
+                a_val, location, value
+            ));
         }
 
         self.cp_val(value);
@@ -82,10 +86,10 @@ impl SharpSM83 {
 
         if MODE == Mode::Debug {
             let a_val = self.registers.get(GeneralRegister::A);
-            println!(
-                "{:#06x}: Comparing Register A ({:#04x}) with Register {:?} ({:#04x})",
-                self.program_counter, a_val, register, value
-            );
+            self.debug_op(&format!(
+                "Comparing Register A ({:#04x}) with Register {:?} ({:#04x})",
+                a_val, register, value
+            ));
         }
 
         self.cp_val(value);
@@ -109,14 +113,10 @@ impl SharpSM83 {
 
         self.registers.set(register, result);
 
-        if MODE == Mode::Debug {
-            println!(
-                "{:#06x}: Register {:?} Increased to {:#04x}",
-                self.program_counter,
-                register,
-                self.registers.get(register)
-            );
-        }
+        self.debug_op(&format!(
+            "Register {:?} Increased to {:#04x}",
+            register, result
+        ));
 
         self.program_counter += 1;
     }
@@ -127,12 +127,10 @@ impl SharpSM83 {
 
         self.registers.set_combined(register, result);
 
-        if MODE == Mode::Debug {
-            println!(
-                "{:#06x}: Register {:?} Increased to {:#06x}",
-                self.program_counter, register, result
-            );
-        }
+        self.debug_op(&format!(
+            "Register {:?} Increased to {:#06x}",
+            register, result
+        ));
 
         self.program_counter += 1;
     }
@@ -140,12 +138,10 @@ impl SharpSM83 {
     fn ld(&mut self, a: GeneralRegister, b: GeneralRegister) {
         let value = self.registers.get(b);
 
-        if MODE == Mode::Debug {
-            println!(
-                "{:#06x}: Loading {:#04x} from Register {:?} to Register {:?}",
-                self.program_counter, value, b, a
-            );
-        }
+        self.debug_op(&format!(
+            "Loading {:#04x} from Register {:?} to Register {:?}",
+            value, b, a
+        ));
 
         self.registers.set(a, value);
 
@@ -159,12 +155,10 @@ impl SharpSM83 {
     ) {
         let value = mbc.get_next_u8(self.program_counter.into());
 
-        if MODE == Mode::Debug {
-            println!(
-                "{:#06x}: Loading {:#06x} to Register {:?}",
-                self.program_counter, value, register
-            );
-        }
+        self.debug_op(&format!(
+            "Loading {:#04x} to Register {:?}",
+            value, register
+        ));
 
         self.registers.set(register, value);
 
@@ -178,12 +172,10 @@ impl SharpSM83 {
     ) {
         let value = mbc.get_next_u16(self.program_counter.into());
 
-        if MODE == Mode::Debug {
-            println!(
-                "{:#06x}: Loading {:#06x} to Register {:?}",
-                self.program_counter, value, register
-            );
-        }
+        self.debug_op(&format!(
+            "Loading {:#04x} to Register {:?}",
+            value, register
+        ));
 
         self.registers.set_combined(register, value);
 
@@ -193,14 +185,37 @@ impl SharpSM83 {
     fn ld_to_sp<T: MemoryBankController + ?Sized>(&mut self, mbc: &mut T) {
         let value = mbc.get_next_u16(self.program_counter.into());
 
-        if MODE == Mode::Debug {
-            println!(
-                "{:#06x}: Loading value {:#06x} into Stack Pointer",
-                self.program_counter, value
-            );
-        }
+        self.debug_op(&format!("Loading {:#04x} into Stack Pointer", value));
 
         self.stack_pointer = value;
+
+        self.program_counter += 3;
+    }
+
+    fn ld_sp_hl(&mut self) {
+        let value = self.registers.get_combined(CombinedRegister::HL);
+
+        self.debug_op(&format!(
+            "Loading {:#04x} into Stack Pointer from HL",
+            value
+        ));
+
+        self.stack_pointer = value;
+
+        self.program_counter += 1;
+    }
+
+    fn ld_memory_from_sp<T: MemoryBankController + ?Sized>(&mut self, mbc: &mut T) {
+        let location = mbc.get_next_u16(self.program_counter.into());
+        let [value1, value2] = u16_to_u8s(self.stack_pointer);
+
+        self.debug_op(&format!(
+            "Loading Stack Pointer value {:#04x} to location {:#06x}",
+            self.stack_pointer, location
+        ));
+
+        mbc.write_memory(location.into(), value1);
+        mbc.write_memory((location + 1).into(), value2);
 
         self.program_counter += 3;
     }
@@ -213,15 +228,12 @@ impl SharpSM83 {
         offset: Option<MemoryOffset>,
     ) {
         let value = self.registers.get(register);
-
-        if MODE == Mode::Debug {
-            println!(
-                "{:#06x}: Loading {:#04x} from Register {:?} to ({:?})",
-                self.program_counter, value, register, location,
-            );
-        }
-
         let memory_location = self.read_memory_with_offset(location, offset);
+
+        self.debug_op(&format!(
+            "Loading {:#04x} from Register {:?} to ({:?}: [{:#04x}])",
+            value, register, location, memory_location
+        ));
 
         mbc.write_memory(memory_location.into(), value);
 
@@ -238,12 +250,10 @@ impl SharpSM83 {
         let memory_location = self.read_memory_with_offset(location, offset);
         let value = mbc.read_memory(memory_location.into());
 
-        if MODE == Mode::Debug {
-            println!(
-                "{:#06x}: Loading {:#04x} from Location ({:?}) to {:?}",
-                self.program_counter, value, memory_location, register,
-            );
-        }
+        self.debug_op(&format!(
+            "Loading {:#04x} from location ({:?}: [{:#04x}]) to ({:?})",
+            value, location, memory_location, register,
+        ));
 
         self.registers.set(register, value);
 
@@ -261,7 +271,7 @@ impl SharpSM83 {
     }
 
     fn cpl(&mut self) {
-        println!("{:#06x}: CPL", self.program_counter);
+        self.debug_op("CPL");
 
         self.registers.set(
             GeneralRegister::A,
@@ -293,10 +303,7 @@ impl SharpSM83 {
     ) {
         if MODE == Mode::Debug {
             let location = mbc.get_next_u16(self.program_counter.into());
-            println!(
-                "{:#06x}: Attempting to jump to {:#06x}",
-                self.program_counter, location
-            );
+            self.debug_op(&format!("Attempting to jump to location {:#06x}", location));
         }
 
         match flag {
@@ -311,30 +318,80 @@ impl SharpSM83 {
         }
     }
 
-    fn jr<T: MemoryBankController + ?Sized>(
+    fn jp_not<T: MemoryBankController + ?Sized>(
         &mut self,
         mbc: &mut T,
         flag: Option<FlagRegisterValue>,
     ) {
         if MODE == Mode::Debug {
-            let relative_location = u16::from(mbc.get_next_u8(self.program_counter.into()));
-            println!(
-                "{:#06x}: Attempting to Jump {:#06x} ops to {:#06x}",
-                self.program_counter,
-                relative_location,
-                self.program_counter + relative_location
-            );
+            let location = mbc.get_next_u16(self.program_counter.into());
+            self.debug_op(&format!("Attempting to jump to location {:#06x}", location));
         }
+
+        match flag {
+            Some(f) if self.registers.is_flag_set(f) => {
+                self.program_counter += 2;
+            }
+            _ => {
+                let jump_location = mbc.get_next_u16(self.program_counter.into());
+
+                self.program_counter = jump_location;
+            }
+        }
+    }
+
+    fn jr_debug<T: MemoryBankController + ?Sized>(&mut self, mbc: &mut T) {
+        if MODE == Mode::Debug {
+            let relative_location = mbc.get_next_u8(self.program_counter.into()) as i8;
+            let abs_location =
+                ((u32::from(self.program_counter) as i32) + (i32::from(relative_location))) as u16;
+
+            self.debug_op(&format!(
+                "Attempting to jump {} operations to location {:#06x}",
+                relative_location, abs_location
+            ));
+        }
+    }
+
+    fn jr_base<T: MemoryBankController + ?Sized>(&mut self, mbc: &mut T) {
+        // Jump to program_counter + i8
+        let relative_location = mbc.get_next_u8(self.program_counter.into()) as i8;
+        let abs_location =
+            ((self.program_counter as u32 as i32) + (relative_location as i32)) as u16;
+
+        self.program_counter = abs_location;
+    }
+
+    fn jr<T: MemoryBankController + ?Sized>(
+        &mut self,
+        mbc: &mut T,
+        flag: Option<FlagRegisterValue>,
+    ) {
+        self.jr_debug(mbc);
 
         match flag {
             Some(f) if !self.registers.is_flag_set(f) => {
                 self.flag_not_found(f);
             }
             _ => {
-                // Jump to program_counter + u8
-                let relative_location = u16::from(mbc.get_next_u8(self.program_counter.into()));
+                self.jr_base(mbc);
+            }
+        }
+    }
 
-                self.program_counter += relative_location;
+    fn jr_not<T: MemoryBankController + ?Sized>(
+        &mut self,
+        mbc: &mut T,
+        flag: Option<FlagRegisterValue>,
+    ) {
+        self.jr_debug(mbc);
+
+        match flag {
+            Some(f) if self.registers.is_flag_set(f) => {
+                self.program_counter += 2;
+            }
+            _ => {
+                self.jr_base(mbc);
             }
         }
     }
@@ -343,14 +400,10 @@ impl SharpSM83 {
         let register_value = self.registers.get(register);
         let result = register_value.wrapping_sub(1);
 
-        if MODE == Mode::Debug {
-            println!(
-                "{:#06x}: Register {:?} Decreased to {}",
-                self.program_counter,
-                register,
-                self.registers.get(register)
-            );
-        }
+        self.debug_op(&format!(
+            "Register {:?} Decreased to {:#04x}",
+            register, result
+        ));
 
         self.registers.set_flag(FlagRegisterValue::N);
 
@@ -358,6 +411,9 @@ impl SharpSM83 {
             FlagRegisterValue::H,
             sub_should_half_carry(register_value, 1),
         );
+
+        self.registers
+            .toggle_flag(FlagRegisterValue::Z, result == 0);
 
         self.registers.set(register, result);
 
@@ -387,10 +443,10 @@ impl SharpSM83 {
 
         if MODE == Mode::Debug {
             let a_val = self.registers.get(GeneralRegister::A);
-            println!(
-                "{:#06x}: Adding Register {:?}'s value ({:#04x}) to Register A ({:#04x})",
-                self.program_counter, register, r_val, a_val
-            );
+            self.debug_op(&format!(
+                "Adding Register {:?}'s value [{:#04x}] to Register A [{:#04x}]",
+                register, r_val, a_val
+            ));
         }
 
         self.add(r_val);
@@ -403,10 +459,10 @@ impl SharpSM83 {
 
         if MODE == Mode::Debug {
             let a_val = self.registers.get(GeneralRegister::A);
-            println!(
-                "{:#06x}: Adding memory location (HL)'s value ({:#04x}) to Register A ({:#04x})",
-                self.program_counter, value, a_val
-            );
+            self.debug_op(&format!(
+                "Adding Memory Location (HL)'s value [{:#04x}] to Register A [{:#04x}]",
+                value, a_val
+            ));
         }
 
         self.add(value);
@@ -436,10 +492,10 @@ impl SharpSM83 {
 
         if MODE == Mode::Debug {
             let hl_value = self.registers.get_combined(CombinedRegister::HL);
-            println!(
-                "{:#06x}: Adding Register {:?}'s value ({:#06x}) to Register HL ({:#06x})",
-                self.program_counter, register, register_value, hl_value
-            );
+            self.debug_op(&format!(
+                "Adding Register {:?}'s value [{:#06x}] to register HL [{:#06x}]",
+                register, register_value, hl_value
+            ));
         }
 
         self.add_16(register_value);
@@ -450,10 +506,10 @@ impl SharpSM83 {
     fn add_sp(&mut self) {
         if MODE == Mode::Debug {
             let hl_val = self.registers.get_combined(CombinedRegister::HL);
-            println!(
-                "{:#06x}: Adding Stack Pointer value ({:#06x}) to Register HL ({:#06x})",
-                self.program_counter, self.stack_pointer, hl_val
-            );
+            self.debug_op(&format!(
+                "Adding Stack Pointer value ({:#06x}) to Register HL ({:#06x})",
+                self.stack_pointer, hl_val
+            ));
         }
 
         self.add_16(self.stack_pointer);
@@ -484,10 +540,10 @@ impl SharpSM83 {
 
         if MODE == Mode::Debug {
             let a_val = self.registers.get(GeneralRegister::A);
-            println!(
-                "{:#06x}: Subtracting Register {:?}'s value ({:#04x}) from Register A ({:#04x})",
-                self.program_counter, register, value, a_val
-            );
+            self.debug_op(&format!(
+                "Subtracting Register {:?}'s value [{:#04x}] from Register A [{:#04x}]",
+                register, value, a_val
+            ));
         }
 
         self.sub(value);
@@ -502,10 +558,10 @@ impl SharpSM83 {
 
         if MODE == Mode::Debug {
             let a_val = self.registers.get(GeneralRegister::A);
-            println!(
-                "{:#06x}: Subtracting Memory Location (HL)'s value ({:#04x}) from Register A ({:#04x})",
-                self.program_counter, value, a_val
-            );
+            self.debug_op(&format!(
+                "Subtracting Memory Location (HL)'s value [{:#04x}] from Register A [{:#04x}]",
+                value, a_val
+            ));
         }
 
         self.sub(value);
@@ -519,10 +575,10 @@ impl SharpSM83 {
 
         if MODE == Mode::Debug {
             let a_val = self.registers.get(GeneralRegister::A);
-            println!(
-                "{:#06x}: Subtracting Register {:?}'s value + CY Flag ({:#04x}) from Register A ({:#04x})",
-                self.program_counter, register, value, a_val
-            );
+            self.debug_op(&format!(
+                "Subtracting Register {:?}'s value [{:#04x}] + CY Flag from Register A [{:#04x}]",
+                register, value, a_val
+            ));
         }
 
         self.sub(value + cy);
@@ -538,10 +594,10 @@ impl SharpSM83 {
 
         if MODE == Mode::Debug {
             let a_val = self.registers.get(GeneralRegister::A);
-            println!(
-                "{:#06x}: Subtracting Memory Location (HL)'s value + CY Flag ({:#04x}) from Register A ({:#04x})",
-                self.program_counter, value, a_val
-            );
+            self.debug_op(&format!(
+                "Subtracting Memory Location (HL)'s value [{:#04x}] + CY Flag from Register A [{:#04x}]",
+                value, a_val
+            ));
         }
 
         self.sub(value + cy);
@@ -549,13 +605,17 @@ impl SharpSM83 {
         self.program_counter += 1;
     }
 
-    fn display_current_registers(&self, program_counter: u16, op: u8) {
-        println!(
-            "{:#06x}: ({:#04x}) {}",
-            program_counter,
-            op,
-            self.registers.display()
-        );
+    fn display_current_registers(&self) {
+        println!("       {}", self.registers.display_combined());
+    }
+
+    fn debug_op(&self, message: &str) {
+        if MODE == Mode::Debug {
+            println!(
+                "{:#06x} ({:#04x}): {}",
+                self.program_counter, self.current_op, message
+            );
+        }
     }
 
     fn read_memory_with_offset(
@@ -578,22 +638,13 @@ impl SharpSM83 {
         let result = value.rotate_left(1);
         self.registers.set(GeneralRegister::A, result);
 
-        if bit_set_at(7, value) {
-            self.registers.set_flag(FlagRegisterValue::C);
-        } else {
-            self.registers.unset_flag(FlagRegisterValue::C);
-        }
-
+        self.registers
+            .toggle_flag(FlagRegisterValue::C, value.is_bit_set(1 << 7));
         self.registers.unset_flag(FlagRegisterValue::Z);
         self.registers.unset_flag(FlagRegisterValue::H);
         self.registers.unset_flag(FlagRegisterValue::N);
 
-        if MODE == Mode::Debug {
-            println!(
-                "{:#06x}: RLCA ({:b}) -> ({:b})",
-                self.program_counter, value, result
-            );
-        }
+        self.debug_op(&format!("RLCA ({:b}) -> ({:b})", value, result));
 
         self.program_counter += 1;
     }
@@ -602,7 +653,7 @@ impl SharpSM83 {
         let result = value.rotate_left(1);
 
         self.registers
-            .toggle_flag(FlagRegisterValue::C, bit_set_at(7, value));
+            .toggle_flag(FlagRegisterValue::C, value.is_bit_set(1 << 7));
 
         self.registers
             .toggle_flag(FlagRegisterValue::Z, result == 0);
@@ -619,12 +670,10 @@ impl SharpSM83 {
 
         self.registers.set(register, result);
 
-        if MODE == Mode::Debug {
-            println!(
-                "{:#06x}: Rotating Register {:?} ({:b}) left ({:b})",
-                self.program_counter, register, value, result,
-            );
-        }
+        self.debug_op(&format!(
+            "Rotating Register {:?} ({:b}) left ({:b})",
+            register, value, result
+        ));
     }
 
     fn rlc_memory<T: MemoryBankController + ?Sized>(&mut self, mbc: &mut T) {
@@ -634,16 +683,14 @@ impl SharpSM83 {
 
         mbc.write_memory(location, result);
 
-        if MODE == Mode::Debug {
-            println!(
-                "{:#06x}: Rotating value at Memory Location (HL) ({:b}) left ({:b})",
-                self.program_counter, value, result,
-            );
-        }
+        self.debug_op(&format!(
+            "Rotating value at Memory Location (HL) ({:b}) left ({:b})",
+            value, result
+        ))
     }
 
     fn bit(&mut self, bit: u8, value: u8) -> bool {
-        let result = bit_set_at(bit, value);
+        let result = value.is_bit_set(1 << bit);
 
         self.registers.toggle_flag(FlagRegisterValue::Z, !result);
 
@@ -657,51 +704,74 @@ impl SharpSM83 {
         let value = self.registers.get(register);
         let result = self.bit(bit, value);
 
-        if MODE == Mode::Debug {
-            println!(
-                "{:#06x}: BIT on Register {:?} ({})",
-                self.program_counter, register, result,
-            );
-        }
+        self.debug_op(&format!("BIT on Register {:?} ({})", register, result));
     }
 
     fn bit_memory<T: MemoryBankController + ?Sized>(&mut self, bit: u8, mbc: &T) {
         let value = mbc.read_memory(self.registers.get_combined(CombinedRegister::HL).into());
         let result = self.bit(bit, value);
 
-        if MODE == Mode::Debug {
-            println!(
-                "{:#06x}: BIT on Memory Location (HL) ({})",
-                self.program_counter, result,
-            );
-        }
+        self.debug_op(&format!("BIT on Memory Location (HL) ({})", result));
     }
 
     fn res_register(&mut self, bit: u8, register: GeneralRegister) {
         let value = self.registers.get(register);
-        let result = reset_bit(bit, value);
+        let result = value.unset_bit(1 << bit);
 
-        if MODE == Mode::Debug {
-            println!(
-                "{:#06x}: RES on Register {:?} bit ({}) before ({:b}) after ({:b})",
-                self.program_counter, register, bit, value, result,
-            );
-        }
+        self.debug_op(&format!(
+            "RES on Register {:?} bit ({}) [{:b} -> {:b}]",
+            register, bit, value, result
+        ));
     }
 
     fn res_memory<T: MemoryBankController + ?Sized>(&mut self, bit: u8, mbc: &mut T) {
         let location: usize = self.registers.get_combined(CombinedRegister::HL).into();
         let value = mbc.read_memory(location);
-        let result = reset_bit(bit, value);
+        let result = value.unset_bit(1 << bit);
 
         mbc.write_memory(location, result);
 
-        if MODE == Mode::Debug {
-            println!(
-                "{:#06x}: RES on Memory Location (HL) bit ({}) before ({:b}) after ({:b})",
-                self.program_counter, bit, value, result,
-            );
-        }
+        self.debug_op(&format!(
+            "RES on Memory Location (HL) bit ({}) [{:b} -> {:b}]",
+            bit, value, result
+        ));
+    }
+
+    fn xor(&mut self, value: u8) {
+        let a_val = self.registers.get(GeneralRegister::A);
+        let result = a_val ^ value;
+
+        self.registers
+            .toggle_flag(FlagRegisterValue::Z, result == 0);
+        self.registers.unset_flag(FlagRegisterValue::C);
+        self.registers.unset_flag(FlagRegisterValue::H);
+        self.registers.unset_flag(FlagRegisterValue::N);
+
+        self.registers.set(GeneralRegister::A, result);
+    }
+
+    fn xor_register(&mut self, register: GeneralRegister) {
+        let value = self.registers.get(register);
+
+        self.debug_op(&format!("Register A XOR Register {:?}", register));
+
+        self.xor(value);
+
+        self.program_counter += 1;
+    }
+
+    fn di(&mut self) {
+        self.debug_op("Disabling Interrupts");
+
+        self.interrupts_enabled = false;
+        self.program_counter += 1;
+    }
+
+    fn ei(&mut self) {
+        self.debug_op("Enabling Interrupts");
+
+        self.interrupts_enabled = true;
+        self.program_counter += 1;
     }
 
     fn prefix<T: MemoryBankController + ?Sized>(&mut self, mbc: &mut T) {
@@ -861,9 +931,9 @@ impl SharpSM83 {
 
     pub fn apply_operation<T: MemoryBankController + ?Sized>(&mut self, mbc: &mut T) {
         let program_counter = self.program_counter;
-        let op = mbc.read_memory(self.program_counter.into());
+        self.current_op = mbc.read_memory(self.program_counter.into());
 
-        match op {
+        match self.current_op {
             0x00 => self.nop(),
             0x01 => self.ld_next_16(mbc, CombinedRegister::BC),
             0x02 => self.ld_rr_r(mbc, CombinedRegister::BC, GeneralRegister::A, None),
@@ -872,7 +942,7 @@ impl SharpSM83 {
             0x05 => self.dec(GeneralRegister::B),
             0x06 => self.ld_next_8(mbc, GeneralRegister::B),
             0x07 => self.rlca(),
-            0x08 => self.not_implemented("LD (u16), Stack Pointer"),
+            0x08 => self.ld_memory_from_sp(mbc),
             0x09 => self.add_combined_register(CombinedRegister::BC),
             0x0A => self.ld_r_rr(mbc, GeneralRegister::A, CombinedRegister::BC, None),
             0x0B => self.not_implemented("DEC BC"),
@@ -898,7 +968,7 @@ impl SharpSM83 {
             0x1E => self.ld_next_8(mbc, GeneralRegister::E),
             0x1F => self.not_implemented("RRA"),
 
-            0x20 => self.jr(mbc, Some(FlagRegisterValue::NZ)),
+            0x20 => self.jr_not(mbc, Some(FlagRegisterValue::Z)),
             0x21 => self.ld_next_16(mbc, CombinedRegister::HL),
             0x22 => self.ld_rr_r(
                 mbc,
@@ -925,7 +995,7 @@ impl SharpSM83 {
             0x2E => self.ld_next_8(mbc, GeneralRegister::L),
             0x2F => self.cpl(),
 
-            0x30 => self.jr(mbc, Some(FlagRegisterValue::NC)),
+            0x30 => self.jr_not(mbc, Some(FlagRegisterValue::C)),
             0x31 => self.ld_to_sp(mbc),
             0x32 => self.ld_rr_r(
                 mbc,
@@ -1062,14 +1132,14 @@ impl SharpSM83 {
             0xA5 => self.not_implemented("AND A, L"),
             0xA6 => self.not_implemented("AND A, (HL)"),
             0xA7 => self.not_implemented("AND A, A"),
-            0xA8 => self.not_implemented("XOR A, B"),
-            0xA9 => self.not_implemented("XOR A, C"),
-            0xAA => self.not_implemented("XOR A, D"),
-            0xAB => self.not_implemented("XOR A, E"),
-            0xAC => self.not_implemented("XOR A, H"),
-            0xAD => self.not_implemented("XOR A, L"),
+            0xA8 => self.xor_register(GeneralRegister::B),
+            0xA9 => self.xor_register(GeneralRegister::C),
+            0xAA => self.xor_register(GeneralRegister::D),
+            0xAB => self.xor_register(GeneralRegister::E),
+            0xAC => self.xor_register(GeneralRegister::H),
+            0xAD => self.xor_register(GeneralRegister::L),
             0xAE => self.not_implemented("XOR A, (HL)"),
-            0xAF => self.not_implemented("XOR A, A"),
+            0xAF => self.xor_register(GeneralRegister::A),
 
             0xB0 => self.not_implemented("OR A, B"),
             0xB1 => self.not_implemented("OR A, C"),
@@ -1093,7 +1163,7 @@ impl SharpSM83 {
 
             0xC0 => self.not_implemented("RET NZ"),
             0xC1 => self.not_implemented("POP BC"),
-            0xC2 => self.jp(mbc, Some(FlagRegisterValue::NZ)),
+            0xC2 => self.jp_not(mbc, Some(FlagRegisterValue::Z)),
             0xC3 => self.jp(mbc, None),
             0xC4 => self.not_implemented("CALL NZ, u16"),
             0xC5 => self.not_implemented("PUSH BC"),
@@ -1110,8 +1180,8 @@ impl SharpSM83 {
 
             0xD0 => self.not_implemented("RET NC"),
             0xD1 => self.not_implemented("POP DE"),
-            0xD2 => self.jp(mbc, Some(FlagRegisterValue::NC)),
-            0xD3 => (),
+            0xD2 => self.jp_not(mbc, Some(FlagRegisterValue::C)),
+            0xD3 => self.nothing(),
             0xD4 => self.not_implemented("CALL NC, u16"),
             0xD5 => self.not_implemented("PUSH DE"),
             0xD6 => self.not_implemented("SUB A, u8"),
@@ -1119,49 +1189,49 @@ impl SharpSM83 {
             0xD8 => self.not_implemented("RET C"),
             0xD9 => self.not_implemented("RETI"),
             0xDA => self.jp(mbc, Some(FlagRegisterValue::C)),
-            0xDB => (),
+            0xDB => self.nothing(),
             0xDC => self.not_implemented("CALL C, u16"),
-            0xDD => (),
+            0xDD => self.nothing(),
             0xDE => self.not_implemented("SBC A, u8"),
             0xDF => self.not_implemented("RST 18h"),
 
             0xE0 => self.not_implemented("LD (FF00+u8), A"),
             0xE1 => self.not_implemented("POP HL"),
             0xE2 => self.not_implemented("LD (FF00+C), A"),
-            0xE3 => (),
-            0xE4 => (),
+            0xE3 => self.nothing(),
+            0xE4 => self.nothing(),
             0xE5 => self.not_implemented("PUSH HL"),
             0xE6 => self.not_implemented("AND A, u8"),
             0xE7 => self.not_implemented("RST 20h"),
             0xE8 => self.not_implemented("ADD SP, i8"),
             0xE9 => self.not_implemented("JP HL"),
             0xEA => self.not_implemented("LD (u16), A"),
-            0xEB => (),
-            0xEC => (),
-            0xED => (),
+            0xEB => self.nothing(),
+            0xEC => self.nothing(),
+            0xED => self.nothing(),
             0xEE => self.not_implemented("XOR A, u8"),
             0xEF => self.not_implemented("RST 28h"),
 
             0xF0 => self.not_implemented("LD A, (FF00+u8)"),
             0xF1 => self.not_implemented("POP AF"),
             0xF2 => self.not_implemented("LD A, (FF00+C)"),
-            0xF3 => self.not_implemented("DI"),
-            0xF4 => (),
+            0xF3 => self.di(),
+            0xF4 => self.nothing(),
             0xF5 => self.not_implemented("PUSH AF"),
             0xF6 => self.not_implemented("OR A, u8"),
             0xF7 => self.not_implemented("RST 30h"),
             0xF8 => self.not_implemented("LD HL, SP+i"),
-            0xF9 => self.not_implemented("LD SP, HL"),
+            0xF9 => self.ld_sp_hl(),
             0xFA => self.not_implemented("LD A, (u16)"),
-            0xFB => self.not_implemented("EI"),
-            0xFC => (),
-            0xFD => (),
+            0xFB => self.ei(),
+            0xFC => self.nothing(),
+            0xFD => self.nothing(),
             0xFE => self.cp_u8(mbc),
             0xFF => self.not_implemented("RST 38h"),
         }
 
         if MODE == Mode::Debug {
-            self.display_current_registers(program_counter, op);
+            self.display_current_registers();
         }
     }
 }

@@ -15,7 +15,7 @@ const SGB_FLAG_LOCATION: usize = 0x146;
 const ROM_SIZE_LOCATION: usize = 0x148;
 const RAM_SIZE_LOCATION: usize = 0x149;
 
-const RAM_BANK_SIZE: usize = 0x8000;
+pub const RAM_BANK_SIZE: usize = 0x8000;
 
 fn buffer_slice_to_string(buffer: &[u8]) -> String {
     let mut visible = String::new();
@@ -81,30 +81,12 @@ fn read_rom_size_bytes(buffer: &[u8]) -> u32 {
     }
 }
 
-#[derive(Clone, Copy)]
-pub struct RamSpec {
-    pub size: usize,
-    pub banks: usize,
-}
-
-fn read_ram_size(buffer: &[u8]) -> Option<RamSpec> {
+fn read_ram_size(buffer: &[u8]) -> Option<u8> {
     match buffer[RAM_SIZE_LOCATION] {
-        0x02 => Some(RamSpec {
-            size: RAM_BANK_SIZE,
-            banks: 1,
-        }),
-        0x03 => Some(RamSpec {
-            size: RAM_BANK_SIZE,
-            banks: 4,
-        }),
-        0x04 => Some(RamSpec {
-            size: RAM_BANK_SIZE,
-            banks: 16,
-        }),
-        0x05 => Some(RamSpec {
-            size: RAM_BANK_SIZE,
-            banks: 8,
-        }),
+        0x02 => Some(1),
+        0x03 => Some(4),
+        0x04 => Some(16),
+        0x05 => Some(8),
         _ => None,
     }
 }
@@ -126,7 +108,7 @@ pub struct CartridgeHeader {
     pub color_gameboy_support: ColorGameboySupport,
     pub super_gameboy_support: SuperGameboySupport,
     pub rom_size_bytes: u32,
-    pub ram_size: Option<RamSpec>,
+    pub ram_size: Option<u8>,
     pub destination_code: DestinationCode,
 }
 
