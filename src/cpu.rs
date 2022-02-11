@@ -9,7 +9,7 @@ use crate::utils::{
 // const CLOCK_MHZ: f64 = 4.194304;
 
 #[derive(Default)]
-pub struct SharpSM83 {
+pub struct Cpu {
     pub program_counter: u16,
     pub stack_pointer: u16,
     pub registers: Registers,
@@ -22,7 +22,7 @@ pub enum MemoryOffset {
     Minus,
 }
 
-impl SharpSM83 {
+impl Cpu {
     fn nothing(&mut self) {
         self.program_counter += 1;
     }
@@ -36,6 +36,7 @@ impl SharpSM83 {
     fn not_implemented(&mut self, message: &str) {
         self.debug_op(&format!("######## TODO: {}", message));
 
+        // Hunting for Not Implementeds now
         panic!("TODO: {}", message);
 
         // self.program_counter += 1;
@@ -284,18 +285,6 @@ impl SharpSM83 {
         self.program_counter += 1;
     }
 
-    fn flag_not_found(&mut self, f: FlagRegisterValue) {
-        if MODE == Mode::Debug {
-            println!(
-                "    Flag {:?} not set. Found {:b}",
-                f,
-                self.registers.get(GeneralRegister::F)
-            );
-        }
-
-        self.program_counter += 1;
-    }
-
     fn jp<T: MemoryBankController + ?Sized>(
         &mut self,
         mbc: &mut T,
@@ -308,7 +297,7 @@ impl SharpSM83 {
 
         match flag {
             Some(f) if !self.registers.is_flag_set(f) => {
-                self.flag_not_found(f);
+                self.program_counter += 2;
             }
             _ => {
                 let jump_location = mbc.get_next_u16(self.program_counter.into());
@@ -340,25 +329,15 @@ impl SharpSM83 {
         }
     }
 
-    fn jr_debug<T: MemoryBankController + ?Sized>(&mut self, mbc: &mut T) {
-        if MODE == Mode::Debug {
-            let relative_location = mbc.get_next_u8(self.program_counter.into()) as i8;
-            let abs_location =
-                ((u32::from(self.program_counter) as i32) + (i32::from(relative_location))) as u16;
-
-            self.debug_op(&format!(
-                "Attempting to jump {} operations to location {:#06x}",
-                relative_location, abs_location
-            ));
-        }
-    }
-
     fn jr_base<T: MemoryBankController + ?Sized>(&mut self, mbc: &mut T) {
-        // Jump to program_counter + i8
-        let relative_location = mbc.get_next_u8(self.program_counter.into()) as i8;
-        let abs_location =
-            ((self.program_counter as u32 as i32) + (relative_location as i32)) as u16;
+        let relative_location_u8 = mbc.get_next_u8(self.program_counter.into());
+        let relative_location = relative_location_u8 as i8;
+        let abs_location = self.program_counter.wrapping_add(relative_location as u16);
 
+        self.debug_op(&format!(
+            "Jumping {} ({:#04x}) operations to location {:#06x}",
+            relative_location, relative_location_u8, abs_location
+        ));
         self.program_counter = abs_location;
     }
 
@@ -367,11 +346,9 @@ impl SharpSM83 {
         mbc: &mut T,
         flag: Option<FlagRegisterValue>,
     ) {
-        self.jr_debug(mbc);
-
         match flag {
             Some(f) if !self.registers.is_flag_set(f) => {
-                self.flag_not_found(f);
+                self.program_counter += 2;
             }
             _ => {
                 self.jr_base(mbc);
@@ -384,8 +361,6 @@ impl SharpSM83 {
         mbc: &mut T,
         flag: Option<FlagRegisterValue>,
     ) {
-        self.jr_debug(mbc);
-
         match flag {
             Some(f) if self.registers.is_flag_set(f) => {
                 self.program_counter += 2;
@@ -930,7 +905,6 @@ impl SharpSM83 {
     }
 
     pub fn apply_operation<T: MemoryBankController + ?Sized>(&mut self, mbc: &mut T) {
-        let program_counter = self.program_counter;
         self.current_op = mbc.read_memory(self.program_counter.into());
 
         match self.current_op {
@@ -1238,12 +1212,12 @@ impl SharpSM83 {
 
 #[cfg(test)]
 mod tests {
-    use super::SharpSM83;
+    use crate::cpu::Cpu;
     use crate::cpu_registers::GeneralRegister;
 
     #[test]
     fn inc_should_work() {
-        let mut cpu = SharpSM83::default();
+        let mut cpu = Cpu::default();
         cpu.inc(GeneralRegister::A);
         let a_val = cpu.registers.get(GeneralRegister::A);
 
@@ -1252,7 +1226,7 @@ mod tests {
 
     #[test]
     fn inc_should_wrap() {
-        let mut cpu = SharpSM83::default();
+        let mut cpu = Cpu::default();
         cpu.registers.set(GeneralRegister::A, 0xff);
         cpu.inc(GeneralRegister::A);
         let a_val = cpu.registers.get(GeneralRegister::A);
@@ -1262,7 +1236,7 @@ mod tests {
 
     #[test]
     fn dec_should_work() {
-        let mut cpu = SharpSM83::default();
+        let mut cpu = Cpu::default();
         cpu.registers.set(GeneralRegister::A, 0x02);
         cpu.dec(GeneralRegister::A);
         let a_val = cpu.registers.get(GeneralRegister::A);
@@ -1272,7 +1246,7 @@ mod tests {
 
     #[test]
     fn dec_should_wrap() {
-        let mut cpu = SharpSM83::default();
+        let mut cpu = Cpu::default();
         cpu.dec(GeneralRegister::A);
         let a_val = cpu.registers.get(GeneralRegister::A);
 
@@ -1281,7 +1255,7 @@ mod tests {
 
     #[test]
     fn add_should_work() {
-        let mut cpu = SharpSM83::default();
+        let mut cpu = Cpu::default();
         cpu.registers.set(GeneralRegister::B, 0x01);
         cpu.add_register(GeneralRegister::B);
         let a_val = cpu.registers.get(GeneralRegister::A);
@@ -1291,7 +1265,7 @@ mod tests {
 
     #[test]
     fn add_should_wrap() {
-        let mut cpu = SharpSM83::default();
+        let mut cpu = Cpu::default();
         cpu.registers.set(GeneralRegister::A, 0xff);
         cpu.registers.set(GeneralRegister::B, 0x01);
         cpu.add_register(GeneralRegister::B);
@@ -1302,7 +1276,7 @@ mod tests {
 
     #[test]
     fn sub_should_work() {
-        let mut cpu = SharpSM83::default();
+        let mut cpu = Cpu::default();
         cpu.registers.set(GeneralRegister::A, 0x02);
         cpu.registers.set(GeneralRegister::B, 0x01);
         cpu.sub_register(GeneralRegister::B);
@@ -1313,7 +1287,7 @@ mod tests {
 
     #[test]
     fn sub_should_wrap() {
-        let mut cpu = SharpSM83::default();
+        let mut cpu = Cpu::default();
         cpu.registers.set(GeneralRegister::B, 0x01);
         cpu.sub_register(GeneralRegister::B);
         let a_val = cpu.registers.get(GeneralRegister::A);
@@ -1323,7 +1297,7 @@ mod tests {
 
     #[test]
     fn ld_should_work() {
-        let mut cpu = SharpSM83::default();
+        let mut cpu = Cpu::default();
         cpu.registers.set(GeneralRegister::A, 0x01);
         cpu.ld(GeneralRegister::B, GeneralRegister::A);
 

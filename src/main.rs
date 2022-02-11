@@ -17,15 +17,16 @@ use std::io;
 mod cartridge;
 mod cartridge_header;
 mod cartridge_type;
+mod cpu;
 mod cpu_registers;
 mod flag_register;
 mod mbc1;
 mod memory_bank_controller;
 mod no_mbc;
-mod sm83;
 mod utils;
 
 use crate::cartridge_type::CartridgeType;
+use crate::cpu::Cpu;
 use crate::mbc1::MBC1;
 use crate::memory_bank_controller::MemoryBankController;
 use crate::no_mbc::NoMBC;
@@ -43,7 +44,7 @@ fn main() -> io::Result<()> {
     let f = File::open("test_games/test.gb")?;
     let cartridge = cartridge::Cartridge::from(f);
     let mut memory = make_controller(cartridge);
-    let mut cpu = sm83::SharpSM83::default();
+    let mut cpu = Cpu::default();
 
     // Skip over the Boot Rom
     cpu.program_counter = 0x100;
