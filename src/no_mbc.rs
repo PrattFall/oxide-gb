@@ -17,7 +17,7 @@ pub struct NoMBC {
 impl From<Cartridge> for NoMBC {
     fn from(cartridge: Cartridge) -> Self {
         NoMBC {
-            ram: cartridge.header.ram_size.map(|s| vec![0x00; RAM_BANK_SIZE]),
+            ram: cartridge.header.ram_size.map(|_| vec![0x00; RAM_BANK_SIZE]),
             rom: cartridge.data,
             video_ram: vec![0x0000; 0x9fff - 0x8000],
             work_ram: vec![0x0000; 0xdfff - 0xc000],

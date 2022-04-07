@@ -221,6 +221,38 @@ impl Cpu {
         self.program_counter += 3;
     }
 
+    fn ld_memory_loc<T: MemoryBankController + ?Sized>(
+        &mut self,
+        mbc: &mut T
+    ) {
+        let location = mbc.get_next_u16(self.program_counter.into());
+        let value = mbc.read_memory(location.into());
+        self.registers.set(GeneralRegister::A, value);
+
+        self.debug_op(&format!(
+            "Loading {:#04x} from memory location {:#04x} to A",
+            value, location
+        ));
+
+        self.program_counter += 3;
+    }
+
+    fn ld_relative_memory_loc<T: MemoryBankController + ?Sized>(
+        &mut self,
+        mbc: &mut T
+    ) {
+        let location = mbc.get_next_u8(self.program_counter.into());
+        let value = mbc.read_memory((0xff00 + location as u16).into());
+        self.registers.set(GeneralRegister::A, value);
+
+        self.debug_op(&format!(
+            "Loading {:#04x} from memory location {:#04x} to A",
+            value, location
+        ));
+
+        self.program_counter += 2;
+    }
+
     fn ld_rr_r<T: MemoryBankController + ?Sized>(
         &mut self,
         mbc: &mut T,
@@ -268,6 +300,7 @@ impl Cpu {
         self.stack_pointer = self.stack_pointer.wrapping_sub(2);
         mbc.write_memory(self.stack_pointer.into(), left);
         mbc.write_memory((self.stack_pointer + 1).into(), right);
+
         self.program_counter = call_location;
     }
 
@@ -639,6 +672,22 @@ impl Cpu {
         result
     }
 
+    fn rrca(&mut self) {
+        let value = self.registers.get(GeneralRegister::A);
+        let result = value.rotate_right(1);
+        self.registers.set(GeneralRegister::A, result);
+
+        self.registers
+            .toggle_flag(FlagRegisterValue::C, value.is_bit_set(1 << 0));
+        self.registers.unset_flag(FlagRegisterValue::Z);
+        self.registers.unset_flag(FlagRegisterValue::H);
+        self.registers.unset_flag(FlagRegisterValue::N);
+
+        self.debug_op(&format!("RRCA ({:b}) -> ({:b})", value, result));
+
+        self.program_counter += 1;
+    }
+
     fn rlc_register(&mut self, register: GeneralRegister) {
         let value = self.registers.get(register);
         let result = self.rlc(value);
@@ -923,7 +972,7 @@ impl Cpu {
             0x0C => self.inc(GeneralRegister::C),
             0x0D => self.dec(GeneralRegister::C),
             0x0E => self.ld_next_8(mbc, GeneralRegister::C),
-            0x0F => self.not_implemented("RRCA"),
+            0x0F => self.rrca(),
 
             0x10 => self.not_implemented("STOP"),
             0x11 => self.ld_next_16(mbc, CombinedRegister::DE),
@@ -1169,7 +1218,7 @@ impl Cpu {
             0xDE => self.not_implemented("SBC A, u8"),
             0xDF => self.not_implemented("RST 18h"),
 
-            0xE0 => self.not_implemented("LD (FF00+u8), A"),
+            0xE0 => self.ld_relative_memory_loc(mbc),
             0xE1 => self.not_implemented("POP HL"),
             0xE2 => self.not_implemented("LD (FF00+C), A"),
             0xE3 => self.nothing(),
@@ -1179,7 +1228,7 @@ impl Cpu {
             0xE7 => self.not_implemented("RST 20h"),
             0xE8 => self.not_implemented("ADD SP, i8"),
             0xE9 => self.not_implemented("JP HL"),
-            0xEA => self.not_implemented("LD (u16), A"),
+            0xEA => self.ld_memory_loc(mbc),
             0xEB => self.nothing(),
             0xEC => self.nothing(),
             0xED => self.nothing(),

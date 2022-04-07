@@ -1,16 +1,3 @@
-// Gameboy Specs:
-// - 8kb Work-RAM
-// - Sharp LR35902
-// - Sharp SM83
-// - 8-bit data bus / 16-bit address bus
-//      - 64-kb of memory access
-//          - Cartridge space
-//          - WRAM and Display RAM
-//          - I/O (joypad, audio, graphics, and LCD)
-//          - Interrupt controls
-// - Resolution: 160x144
-// - 4 shades of grey
-
 use std::fs::File;
 use std::io;
 
@@ -24,12 +11,15 @@ mod mbc1;
 mod memory_bank_controller;
 mod no_mbc;
 mod utils;
+mod tile;
+mod render;
 
 use crate::cartridge_type::CartridgeType;
 use crate::cpu::Cpu;
 use crate::mbc1::MBC1;
 use crate::memory_bank_controller::MemoryBankController;
 use crate::no_mbc::NoMBC;
+use crate::render::render;
 
 pub fn make_controller(cartridge: cartridge::Cartridge) -> Box<dyn MemoryBankController> {
     match cartridge.header.cartridge_type {
@@ -49,7 +39,11 @@ fn main() -> io::Result<()> {
     // Skip over the Boot Rom
     cpu.program_counter = 0x100;
 
-    loop {
-        cpu.apply_operation(&mut *memory);
-    }
+    render().unwrap();
+
+    // loop {
+    //     cpu.apply_operation(&mut *memory);
+    // }
+
+    Ok(())
 }
