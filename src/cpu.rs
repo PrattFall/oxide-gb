@@ -2,18 +2,18 @@ use crate::cpu_registers::{CombinedRegister, GeneralRegister, Registers};
 use crate::flag_register::FlagRegisterValue;
 use crate::mbc::MBC;
 use crate::utils::{
-    add_16_should_half_carry, add_should_half_carry, sub_should_half_carry, u16_to_u8s, BitWise
+    add_16_should_half_carry, add_should_half_carry, sub_should_half_carry, u16_to_u8s, BitWise,
 };
 
 // const CLOCK_MHZ: f64 = 4.194304;
 
+#[derive(Default)]
 pub struct Cpu {
     pub program_counter: u16,
     pub stack_pointer: u16,
     pub registers: Registers,
     pub interrupts_enabled: bool,
     pub current_op: u8,
-    mbc: MBC
 }
 
 pub enum MemoryOffset {
@@ -22,17 +22,6 @@ pub enum MemoryOffset {
 }
 
 impl Cpu {
-    pub fn new(mbc: MBC) -> Self {
-        Cpu {
-            program_counter: 0,
-            stack_pointer: 0,
-            registers: Registers::default(),
-            interrupts_enabled: false,
-            current_op: 0,
-            mbc
-        }
-    }
-
     fn nothing(&mut self) {
         self.program_counter += 1;
     }
@@ -51,22 +40,20 @@ impl Cpu {
     fn cp_val(&mut self, value: u8) {
         let a_val = self.registers.get(GeneralRegister::A);
 
-        self.registers.toggle_flag(
-            FlagRegisterValue::Z,
-            a_val.wrapping_sub(value) == 0
-        );
+        self.registers
+            .toggle_flag(FlagRegisterValue::Z, a_val.wrapping_sub(value) == 0);
     }
 
-    fn cp_memory(&mut self, location: usize) {
-        let value = self.mbc.read(location);
+    fn cp_memory(&mut self, mbc: &MBC, location: usize) {
+        let value = mbc.read(location);
 
         self.cp_val(value);
 
         self.program_counter += 1;
     }
 
-    fn cp_u8(&mut self) {
-        let value = self.mbc.get_next_u8(self.program_counter.into());
+    fn cp_next_8(&mut self, mbc: &MBC) {
+        let value = mbc.get_next_u8(self.program_counter.into());
 
         self.cp_val(value);
 
@@ -115,27 +102,24 @@ impl Cpu {
         self.program_counter += 1;
     }
 
-    fn ld_next_8(&mut self, register: GeneralRegister) {
-        let value = self.mbc.get_next_u8(self.program_counter.into());
+    fn ld_next_8(&mut self, mbc: &MBC, register: GeneralRegister) {
+        let value = mbc.get_next_u8(self.program_counter.into());
 
         self.registers.set(register, value);
 
         self.program_counter += 2;
     }
 
-    fn ld_next_16(
-        &mut self,
-        register: CombinedRegister,
-    ) {
-        let value = self.mbc.get_next_u16(self.program_counter.into());
+    fn ld_next_16(&mut self, mbc: &MBC, register: CombinedRegister) {
+        let value = mbc.get_next_u16(self.program_counter.into());
 
         self.registers.set_combined(register, value);
 
         self.program_counter += 3;
     }
 
-    fn ld_to_sp(&mut self) {
-        let value = self.mbc.get_next_u16(self.program_counter.into());
+    fn ld_to_sp(&mut self, mbc: &MBC) {
+        let value = mbc.get_next_u16(self.program_counter.into());
 
         self.stack_pointer = value;
 
@@ -150,31 +134,27 @@ impl Cpu {
         self.program_counter += 1;
     }
 
-    fn ld_memory_from_sp(&mut self) {
-        let location = self.mbc.get_next_u16(self.program_counter.into());
+    fn ld_memory_from_sp(&mut self, mbc: &mut MBC) {
+        let location = mbc.get_next_u16(self.program_counter.into());
         let [value1, value2] = u16_to_u8s(self.stack_pointer);
 
-        self.mbc.write(location.into(), value1);
-        self.mbc.write((location + 1).into(), value2);
+        mbc.write(location.into(), value1);
+        mbc.write((location + 1).into(), value2);
 
         self.program_counter += 3;
     }
 
-    fn ld_memory_loc(
-        &mut self,
-    ) {
-        let location = self.mbc.get_next_u16(self.program_counter.into());
-        let value = self.mbc.read(location.into());
+    fn ld_memory_loc(&mut self, mbc: &MBC) {
+        let location = mbc.get_next_u16(self.program_counter.into());
+        let value = mbc.read(location.into());
         self.registers.set(GeneralRegister::A, value);
 
         self.program_counter += 3;
     }
 
-    fn ld_relative_memory_loc(
-        &mut self,
-    ) {
-        let location = self.mbc.get_next_u8(self.program_counter.into());
-        let value = self.mbc.read((0xff00 + location as u16).into());
+    fn ld_relative_memory_loc(&mut self, mbc: &MBC) {
+        let location = mbc.get_next_u8(self.program_counter.into());
+        let value = mbc.read((0xff00 + location as u16).into());
         self.registers.set(GeneralRegister::A, value);
 
         self.program_counter += 2;
@@ -182,6 +162,7 @@ impl Cpu {
 
     fn ld_rr_r(
         &mut self,
+        mbc: &mut MBC,
         location: CombinedRegister,
         register: GeneralRegister,
         offset: Option<MemoryOffset>,
@@ -189,32 +170,33 @@ impl Cpu {
         let value = self.registers.get(register);
         let memory_location = self.read_with_offset(location, offset);
 
-        self.mbc.write(memory_location.into(), value);
+        mbc.write(memory_location.into(), value);
 
         self.program_counter += 1;
     }
 
     fn ld_r_rr(
         &mut self,
+        mbc: &MBC,
         register: GeneralRegister,
         location: CombinedRegister,
         offset: Option<MemoryOffset>,
     ) {
         let memory_location = self.read_with_offset(location, offset);
-        let value = self.mbc.read(memory_location.into());
+        let value = mbc.read(memory_location.into());
 
         self.registers.set(register, value);
 
         self.program_counter += 1;
     }
 
-    fn call(&mut self) {
-        let call_location = self.mbc.get_next_u16(self.program_counter.into());
+    fn call(&mut self, mbc: &mut MBC) {
+        let call_location = mbc.get_next_u16(self.program_counter.into());
         let [left, right] = u16_to_u8s(self.program_counter);
 
         self.stack_pointer = self.stack_pointer.wrapping_sub(2);
-        self.mbc.write(self.stack_pointer.into(), left);
-        self.mbc.write((self.stack_pointer + 1).into(), right);
+        mbc.write(self.stack_pointer.into(), left);
+        mbc.write((self.stack_pointer + 1).into(), right);
 
         self.program_counter = call_location;
     }
@@ -231,70 +213,58 @@ impl Cpu {
         self.program_counter += 1;
     }
 
-    fn jp(
-        &mut self,
-        flag: Option<FlagRegisterValue>,
-    ) {
+    fn jp(&mut self, mbc: &MBC, flag: Option<FlagRegisterValue>) {
         match flag {
             Some(f) if !self.registers.is_flag_set(f) => {
                 self.program_counter += 2;
             }
             _ => {
-                let jump_location = self.mbc.get_next_u16(self.program_counter.into());
+                let jump_location = mbc.get_next_u16(self.program_counter.into());
 
                 self.program_counter = jump_location;
             }
         }
     }
 
-    fn jp_not(
-        &mut self,
-        flag: Option<FlagRegisterValue>,
-    ) {
+    fn jp_not(&mut self, mbc: &MBC, flag: Option<FlagRegisterValue>) {
         match flag {
             Some(f) if self.registers.is_flag_set(f) => {
                 self.program_counter += 2;
             }
             _ => {
-                let jump_location = self.mbc.get_next_u16(self.program_counter.into());
+                let jump_location = mbc.get_next_u16(self.program_counter.into());
 
                 self.program_counter = jump_location;
             }
         }
     }
 
-    fn jr_base(&mut self) {
-        let relative_location_u8 = self.mbc.get_next_u8(self.program_counter.into());
+    fn jr_base(&mut self, mbc: &MBC) {
+        let relative_location_u8 = mbc.get_next_u8(self.program_counter.into());
         let relative_location = relative_location_u8 as i8;
         let abs_location = self.program_counter.wrapping_add(relative_location as u16);
 
         self.program_counter = abs_location;
     }
 
-    fn jr(
-        &mut self,
-        flag: Option<FlagRegisterValue>,
-    ) {
+    fn jr(&mut self, mbc: &MBC, flag: Option<FlagRegisterValue>) {
         match flag {
             Some(f) if !self.registers.is_flag_set(f) => {
                 self.program_counter += 2;
             }
             _ => {
-                self.jr_base();
+                self.jr_base(mbc);
             }
         }
     }
 
-    fn jr_not(
-        &mut self,
-        flag: Option<FlagRegisterValue>,
-    ) {
+    fn jr_not(&mut self, mbc: &MBC, flag: Option<FlagRegisterValue>) {
         match flag {
             Some(f) if self.registers.is_flag_set(f) => {
                 self.program_counter += 2;
             }
             _ => {
-                self.jr_base();
+                self.jr_base(mbc);
             }
         }
     }
@@ -344,8 +314,8 @@ impl Cpu {
         self.program_counter += 1;
     }
 
-    fn add_memory(&mut self) {
-        let value = self.mbc.read(self.registers.get16(CombinedRegister::HL).into());
+    fn add_memory(&mut self, mbc: &MBC) {
+        let value = mbc.read(self.registers.get16(CombinedRegister::HL).into());
 
         self.add(value);
 
@@ -409,10 +379,8 @@ impl Cpu {
         self.program_counter += 1;
     }
 
-    fn sub_hl(&mut self) {
-        let value = self.mbc.read(usize::from(
-            self.registers.get16(CombinedRegister::HL),
-        ));
+    fn sub_hl(&mut self, mbc: &MBC) {
+        let value = mbc.read(usize::from(self.registers.get16(CombinedRegister::HL)));
 
         self.sub(value);
 
@@ -428,10 +396,8 @@ impl Cpu {
         self.program_counter += 1;
     }
 
-    fn sbc_hl(&mut self) {
-        let value = self.mbc.read(usize::from(
-            self.registers.get16(CombinedRegister::HL),
-        ));
+    fn sbc_hl(&mut self, mbc: &MBC) {
+        let value = mbc.read(usize::from(self.registers.get16(CombinedRegister::HL)));
         let cy = self.registers.is_flag_set(FlagRegisterValue::C) as u8;
 
         self.sub(value + cy);
@@ -439,11 +405,7 @@ impl Cpu {
         self.program_counter += 1;
     }
 
-    fn read_with_offset(
-        &self,
-        location: CombinedRegister,
-        offset: Option<MemoryOffset>,
-    ) -> u16 {
+    fn read_with_offset(&self, location: CombinedRegister, offset: Option<MemoryOffset>) -> u16 {
         let memory_loc = self.registers.get16(location);
 
         match offset {
@@ -502,19 +464,19 @@ impl Cpu {
         let result = self.rlc(value);
 
         self.registers.set(register, result);
-
     }
 
-    fn rlc_memory(&mut self) {
+    fn rlc_memory(&mut self, mbc: &mut MBC) {
         let location: usize = self.registers.get16(CombinedRegister::HL).into();
-        let value = self.mbc.read(location);
+        let value = mbc.read(location);
         let result = self.rlc(value);
 
-        self.mbc.write(location, result);
+        mbc.write(location, result);
     }
 
     fn bit(&mut self, bit: u8, value: u8) {
-        self.registers.toggle_flag(FlagRegisterValue::Z, !value.is_bit_set(1 << bit));
+        self.registers
+            .toggle_flag(FlagRegisterValue::Z, !value.is_bit_set(1 << bit));
 
         self.registers.unset_flag(FlagRegisterValue::N);
         self.registers.set_flag(FlagRegisterValue::H);
@@ -525,8 +487,8 @@ impl Cpu {
         self.bit(bit, value);
     }
 
-    fn bit_memory(&mut self, bit: u8) {
-        let value = self.mbc.read(self.registers.get16(CombinedRegister::HL).into());
+    fn bit_memory(&mut self, mbc: &MBC, bit: u8) {
+        let value = mbc.read(self.registers.get16(CombinedRegister::HL).into());
         self.bit(bit, value);
     }
 
@@ -535,12 +497,12 @@ impl Cpu {
         value.unset_bit(1 << bit);
     }
 
-    fn res_memory(&mut self, bit: u8) {
+    fn res_memory(&mut self, mbc: &mut MBC, bit: u8) {
         let location: usize = self.registers.get16(CombinedRegister::HL).into();
-        let value = self.mbc.read(location);
+        let value = mbc.read(location);
         let result = value.unset_bit(1 << bit);
 
-        self.mbc.write(location, result);
+        mbc.write(location, result);
     }
 
     fn xor(&mut self, value: u8) {
@@ -574,8 +536,8 @@ impl Cpu {
         self.program_counter += 1;
     }
 
-    fn prefix(&mut self) {
-        let op = self.mbc.get_next_u8(self.program_counter.into());
+    fn prefix(&mut self, mbc: &mut MBC) {
+        let op = mbc.get_next_u8(self.program_counter.into());
 
         match op {
             0x00 => self.rlc_register(GeneralRegister::B),
@@ -584,7 +546,7 @@ impl Cpu {
             0x03 => self.rlc_register(GeneralRegister::E),
             0x04 => self.rlc_register(GeneralRegister::H),
             0x05 => self.rlc_register(GeneralRegister::L),
-            0x06 => self.rlc_memory(),
+            0x06 => self.rlc_memory(mbc),
             0x07 => self.rlc_register(GeneralRegister::A),
 
             0x40 => self.bit_register(0, GeneralRegister::B),
@@ -593,7 +555,7 @@ impl Cpu {
             0x43 => self.bit_register(0, GeneralRegister::E),
             0x44 => self.bit_register(0, GeneralRegister::H),
             0x45 => self.bit_register(0, GeneralRegister::L),
-            0x46 => self.bit_memory(0),
+            0x46 => self.bit_memory(mbc, 0),
             0x47 => self.bit_register(0, GeneralRegister::A),
             0x48 => self.bit_register(1, GeneralRegister::B),
             0x49 => self.bit_register(1, GeneralRegister::C),
@@ -601,7 +563,7 @@ impl Cpu {
             0x4B => self.bit_register(1, GeneralRegister::E),
             0x4C => self.bit_register(1, GeneralRegister::H),
             0x4D => self.bit_register(1, GeneralRegister::L),
-            0x4E => self.bit_memory(1),
+            0x4E => self.bit_memory(mbc, 1),
             0x4F => self.bit_register(1, GeneralRegister::A),
 
             0x50 => self.bit_register(2, GeneralRegister::B),
@@ -610,7 +572,7 @@ impl Cpu {
             0x53 => self.bit_register(2, GeneralRegister::E),
             0x54 => self.bit_register(2, GeneralRegister::H),
             0x55 => self.bit_register(2, GeneralRegister::L),
-            0x56 => self.bit_memory(2),
+            0x56 => self.bit_memory(mbc, 2),
             0x57 => self.bit_register(2, GeneralRegister::A),
             0x58 => self.bit_register(3, GeneralRegister::B),
             0x59 => self.bit_register(3, GeneralRegister::C),
@@ -618,7 +580,7 @@ impl Cpu {
             0x5B => self.bit_register(3, GeneralRegister::E),
             0x5C => self.bit_register(3, GeneralRegister::H),
             0x5D => self.bit_register(3, GeneralRegister::L),
-            0x5E => self.bit_memory(3),
+            0x5E => self.bit_memory(mbc, 3),
             0x5F => self.bit_register(3, GeneralRegister::A),
 
             0x60 => self.bit_register(4, GeneralRegister::B),
@@ -627,7 +589,7 @@ impl Cpu {
             0x63 => self.bit_register(4, GeneralRegister::E),
             0x64 => self.bit_register(4, GeneralRegister::H),
             0x65 => self.bit_register(4, GeneralRegister::L),
-            0x66 => self.bit_memory(4),
+            0x66 => self.bit_memory(mbc, 4),
             0x67 => self.bit_register(4, GeneralRegister::A),
             0x68 => self.bit_register(5, GeneralRegister::B),
             0x69 => self.bit_register(5, GeneralRegister::C),
@@ -635,7 +597,7 @@ impl Cpu {
             0x6B => self.bit_register(5, GeneralRegister::E),
             0x6C => self.bit_register(5, GeneralRegister::H),
             0x6D => self.bit_register(5, GeneralRegister::L),
-            0x6E => self.bit_memory(5),
+            0x6E => self.bit_memory(mbc, 5),
             0x6F => self.bit_register(5, GeneralRegister::A),
 
             0x70 => self.bit_register(6, GeneralRegister::B),
@@ -644,7 +606,7 @@ impl Cpu {
             0x73 => self.bit_register(6, GeneralRegister::E),
             0x74 => self.bit_register(6, GeneralRegister::H),
             0x75 => self.bit_register(6, GeneralRegister::L),
-            0x76 => self.bit_memory(6),
+            0x76 => self.bit_memory(mbc, 6),
             0x77 => self.bit_register(6, GeneralRegister::A),
             0x78 => self.bit_register(7, GeneralRegister::B),
             0x79 => self.bit_register(7, GeneralRegister::C),
@@ -652,7 +614,7 @@ impl Cpu {
             0x7B => self.bit_register(7, GeneralRegister::E),
             0x7C => self.bit_register(7, GeneralRegister::H),
             0x7D => self.bit_register(7, GeneralRegister::L),
-            0x7E => self.bit_memory(7),
+            0x7E => self.bit_memory(mbc, 7),
             0x7F => self.bit_register(7, GeneralRegister::A),
 
             0x80 => self.res_register(0, GeneralRegister::B),
@@ -661,7 +623,7 @@ impl Cpu {
             0x83 => self.res_register(0, GeneralRegister::E),
             0x84 => self.res_register(0, GeneralRegister::H),
             0x85 => self.res_register(0, GeneralRegister::L),
-            0x86 => self.res_memory(0),
+            0x86 => self.res_memory(mbc, 0),
             0x87 => self.res_register(0, GeneralRegister::A),
             0x88 => self.res_register(1, GeneralRegister::B),
             0x89 => self.res_register(1, GeneralRegister::C),
@@ -669,7 +631,7 @@ impl Cpu {
             0x8B => self.res_register(1, GeneralRegister::E),
             0x8C => self.res_register(1, GeneralRegister::H),
             0x8D => self.res_register(1, GeneralRegister::L),
-            0x8E => self.res_memory(1),
+            0x8E => self.res_memory(mbc, 1),
             0x8F => self.res_register(1, GeneralRegister::A),
 
             0x90 => self.res_register(2, GeneralRegister::B),
@@ -678,7 +640,7 @@ impl Cpu {
             0x93 => self.res_register(2, GeneralRegister::E),
             0x94 => self.res_register(2, GeneralRegister::H),
             0x95 => self.res_register(2, GeneralRegister::L),
-            0x96 => self.res_memory(2),
+            0x96 => self.res_memory(mbc, 2),
             0x97 => self.res_register(2, GeneralRegister::A),
             0x98 => self.res_register(3, GeneralRegister::B),
             0x99 => self.res_register(3, GeneralRegister::C),
@@ -686,7 +648,7 @@ impl Cpu {
             0x9B => self.res_register(3, GeneralRegister::E),
             0x9C => self.res_register(3, GeneralRegister::H),
             0x9D => self.res_register(3, GeneralRegister::L),
-            0x9E => self.res_memory(3),
+            0x9E => self.res_memory(mbc, 3),
             0x9F => self.res_register(3, GeneralRegister::A),
 
             0xA0 => self.res_register(4, GeneralRegister::B),
@@ -695,7 +657,7 @@ impl Cpu {
             0xA3 => self.res_register(4, GeneralRegister::E),
             0xA4 => self.res_register(4, GeneralRegister::H),
             0xA5 => self.res_register(4, GeneralRegister::L),
-            0xA6 => self.res_memory(4),
+            0xA6 => self.res_memory(mbc, 4),
             0xA7 => self.res_register(4, GeneralRegister::A),
             0xA8 => self.res_register(5, GeneralRegister::B),
             0xA9 => self.res_register(5, GeneralRegister::C),
@@ -703,7 +665,7 @@ impl Cpu {
             0xAB => self.res_register(5, GeneralRegister::E),
             0xAC => self.res_register(5, GeneralRegister::H),
             0xAD => self.res_register(5, GeneralRegister::L),
-            0xAE => self.res_memory(5),
+            0xAE => self.res_memory(mbc, 5),
             0xAF => self.res_register(5, GeneralRegister::A),
 
             0xB0 => self.res_register(6, GeneralRegister::B),
@@ -712,7 +674,7 @@ impl Cpu {
             0xB3 => self.res_register(6, GeneralRegister::E),
             0xB4 => self.res_register(6, GeneralRegister::H),
             0xB5 => self.res_register(6, GeneralRegister::L),
-            0xB6 => self.res_memory(6),
+            0xB6 => self.res_memory(mbc, 6),
             0xB7 => self.res_register(6, GeneralRegister::A),
             0xB8 => self.res_register(7, GeneralRegister::B),
             0xB9 => self.res_register(7, GeneralRegister::C),
@@ -720,7 +682,7 @@ impl Cpu {
             0xBB => self.res_register(7, GeneralRegister::E),
             0xBC => self.res_register(7, GeneralRegister::H),
             0xBD => self.res_register(7, GeneralRegister::L),
-            0xBE => self.res_memory(7),
+            0xBE => self.res_memory(mbc, 7),
             0xBF => self.res_register(7, GeneralRegister::A),
 
             _ => self.not_implemented(&format!("Prefix not implemented: {:#04x}", op)),
@@ -729,47 +691,48 @@ impl Cpu {
         self.program_counter += 2;
     }
 
-    pub fn apply_operation(&mut self) {
-        self.current_op = self.mbc.read(self.program_counter.into());
+    pub fn apply_operation(&mut self, mbc: &mut MBC) {
+        self.current_op = mbc.read(self.program_counter.into());
 
         match self.current_op {
             0x00 => self.nop(),
-            0x01 => self.ld_next_16(CombinedRegister::BC),
-            0x02 => self.ld_rr_r(CombinedRegister::BC, GeneralRegister::A, None),
+            0x01 => self.ld_next_16(mbc, CombinedRegister::BC),
+            0x02 => self.ld_rr_r(mbc, CombinedRegister::BC, GeneralRegister::A, None),
             0x03 => self.inc16(CombinedRegister::BC),
             0x04 => self.inc(GeneralRegister::B),
             0x05 => self.dec(GeneralRegister::B),
-            0x06 => self.ld_next_8(GeneralRegister::B),
+            0x06 => self.ld_next_8(mbc, GeneralRegister::B),
             0x07 => self.rlca(),
-            0x08 => self.ld_memory_from_sp(),
+            0x08 => self.ld_memory_from_sp(mbc),
             0x09 => self.add_combined_register(CombinedRegister::BC),
-            0x0A => self.ld_r_rr(GeneralRegister::A, CombinedRegister::BC, None),
+            0x0A => self.ld_r_rr(mbc, GeneralRegister::A, CombinedRegister::BC, None),
             0x0B => self.not_implemented("DEC BC"),
             0x0C => self.inc(GeneralRegister::C),
             0x0D => self.dec(GeneralRegister::C),
-            0x0E => self.ld_next_8(GeneralRegister::C),
+            0x0E => self.ld_next_8(mbc, GeneralRegister::C),
             0x0F => self.rrca(),
 
             0x10 => self.not_implemented("STOP"),
-            0x11 => self.ld_next_16(CombinedRegister::DE),
-            0x12 => self.ld_rr_r(CombinedRegister::DE, GeneralRegister::A, None),
+            0x11 => self.ld_next_16(mbc, CombinedRegister::DE),
+            0x12 => self.ld_rr_r(mbc, CombinedRegister::DE, GeneralRegister::A, None),
             0x13 => self.inc16(CombinedRegister::DE),
             0x14 => self.inc(GeneralRegister::D),
             0x15 => self.dec(GeneralRegister::D),
-            0x16 => self.ld_next_8(GeneralRegister::D),
+            0x16 => self.ld_next_8(mbc, GeneralRegister::D),
             0x17 => self.not_implemented("RLA"),
-            0x18 => self.jr(None),
+            0x18 => self.jr(mbc, None),
             0x19 => self.add_combined_register(CombinedRegister::DE),
-            0x1A => self.ld_r_rr(GeneralRegister::A, CombinedRegister::DE, None),
+            0x1A => self.ld_r_rr(mbc, GeneralRegister::A, CombinedRegister::DE, None),
             0x1B => self.not_implemented("DEC DE"),
             0x1C => self.inc(GeneralRegister::E),
             0x1D => self.dec(GeneralRegister::E),
-            0x1E => self.ld_next_8(GeneralRegister::E),
+            0x1E => self.ld_next_8(mbc, GeneralRegister::E),
             0x1F => self.not_implemented("RRA"),
 
-            0x20 => self.jr_not(Some(FlagRegisterValue::Z)),
-            0x21 => self.ld_next_16(CombinedRegister::HL),
+            0x20 => self.jr_not(mbc, Some(FlagRegisterValue::Z)),
+            0x21 => self.ld_next_16(mbc, CombinedRegister::HL),
             0x22 => self.ld_rr_r(
+                mbc,
                 CombinedRegister::HL,
                 GeneralRegister::A,
                 Some(MemoryOffset::Plus),
@@ -779,9 +742,10 @@ impl Cpu {
             0x25 => self.dec(GeneralRegister::H),
             0x26 => self.not_implemented("LD H, d8"),
             0x27 => self.not_implemented("DAA"),
-            0x28 => self.jr(Some(FlagRegisterValue::Z)),
+            0x28 => self.jr(mbc, Some(FlagRegisterValue::Z)),
             0x29 => self.add_combined_register(CombinedRegister::HL),
             0x2A => self.ld_r_rr(
+                mbc,
                 GeneralRegister::A,
                 CombinedRegister::HL,
                 Some(MemoryOffset::Plus),
@@ -789,12 +753,13 @@ impl Cpu {
             0x2B => self.not_implemented("DEC HL"),
             0x2C => self.inc(GeneralRegister::L),
             0x2D => self.dec(GeneralRegister::L),
-            0x2E => self.ld_next_8(GeneralRegister::L),
+            0x2E => self.ld_next_8(mbc, GeneralRegister::L),
             0x2F => self.cpl(),
 
-            0x30 => self.jr_not(Some(FlagRegisterValue::C)),
-            0x31 => self.ld_to_sp(),
+            0x30 => self.jr_not(mbc, Some(FlagRegisterValue::C)),
+            0x31 => self.ld_to_sp(mbc),
             0x32 => self.ld_rr_r(
+                mbc,
                 CombinedRegister::HL,
                 GeneralRegister::A,
                 Some(MemoryOffset::Minus),
@@ -804,9 +769,10 @@ impl Cpu {
             0x35 => self.not_implemented("DEC (HL) 1"),
             0x36 => self.not_implemented("LD (HL), u8"),
             0x37 => self.not_implemented("SCF"),
-            0x38 => self.jr(Some(FlagRegisterValue::C)),
+            0x38 => self.jr(mbc, Some(FlagRegisterValue::C)),
             0x39 => self.add_sp(),
             0x3A => self.ld_r_rr(
+                mbc,
                 GeneralRegister::A,
                 CombinedRegister::HL,
                 Some(MemoryOffset::Minus),
@@ -814,7 +780,7 @@ impl Cpu {
             0x3B => self.not_implemented("DEC SP"),
             0x3C => self.inc(GeneralRegister::A),
             0x3D => self.dec(GeneralRegister::A),
-            0x3E => self.ld_next_8(GeneralRegister::A),
+            0x3E => self.ld_next_8(mbc, GeneralRegister::A),
             0x3F => self.not_implemented("CCF"),
 
             0x40 => self.ld(GeneralRegister::B, GeneralRegister::B),
@@ -823,7 +789,7 @@ impl Cpu {
             0x43 => self.ld(GeneralRegister::B, GeneralRegister::E),
             0x44 => self.ld(GeneralRegister::B, GeneralRegister::H),
             0x45 => self.ld(GeneralRegister::B, GeneralRegister::L),
-            0x46 => self.ld_r_rr(GeneralRegister::B, CombinedRegister::HL, None),
+            0x46 => self.ld_r_rr(mbc, GeneralRegister::B, CombinedRegister::HL, None),
             0x47 => self.ld(GeneralRegister::B, GeneralRegister::A),
             0x48 => self.ld(GeneralRegister::C, GeneralRegister::B),
             0x49 => self.ld(GeneralRegister::C, GeneralRegister::C),
@@ -831,7 +797,7 @@ impl Cpu {
             0x4B => self.ld(GeneralRegister::C, GeneralRegister::E),
             0x4C => self.ld(GeneralRegister::C, GeneralRegister::H),
             0x4D => self.ld(GeneralRegister::C, GeneralRegister::L),
-            0x4E => self.ld_r_rr(GeneralRegister::C, CombinedRegister::HL, None),
+            0x4E => self.ld_r_rr(mbc, GeneralRegister::C, CombinedRegister::HL, None),
             0x4F => self.ld(GeneralRegister::C, GeneralRegister::A),
 
             0x50 => self.ld(GeneralRegister::D, GeneralRegister::B),
@@ -840,7 +806,7 @@ impl Cpu {
             0x53 => self.ld(GeneralRegister::D, GeneralRegister::E),
             0x54 => self.ld(GeneralRegister::D, GeneralRegister::H),
             0x55 => self.ld(GeneralRegister::D, GeneralRegister::L),
-            0x56 => self.ld_r_rr(GeneralRegister::D, CombinedRegister::HL, None),
+            0x56 => self.ld_r_rr(mbc, GeneralRegister::D, CombinedRegister::HL, None),
             0x57 => self.ld(GeneralRegister::D, GeneralRegister::A),
             0x58 => self.ld(GeneralRegister::E, GeneralRegister::B),
             0x59 => self.ld(GeneralRegister::E, GeneralRegister::C),
@@ -848,7 +814,7 @@ impl Cpu {
             0x5B => self.ld(GeneralRegister::E, GeneralRegister::E),
             0x5C => self.ld(GeneralRegister::E, GeneralRegister::H),
             0x5D => self.ld(GeneralRegister::E, GeneralRegister::L),
-            0x5E => self.ld_r_rr(GeneralRegister::E, CombinedRegister::HL, None),
+            0x5E => self.ld_r_rr(mbc, GeneralRegister::E, CombinedRegister::HL, None),
             0x5F => self.ld(GeneralRegister::E, GeneralRegister::A),
 
             0x60 => self.ld(GeneralRegister::H, GeneralRegister::B),
@@ -857,7 +823,7 @@ impl Cpu {
             0x63 => self.ld(GeneralRegister::H, GeneralRegister::E),
             0x64 => self.ld(GeneralRegister::H, GeneralRegister::H),
             0x65 => self.ld(GeneralRegister::H, GeneralRegister::L),
-            0x66 => self.ld_r_rr(GeneralRegister::H, CombinedRegister::HL, None),
+            0x66 => self.ld_r_rr(mbc, GeneralRegister::H, CombinedRegister::HL, None),
             0x67 => self.ld(GeneralRegister::H, GeneralRegister::A),
             0x68 => self.ld(GeneralRegister::L, GeneralRegister::B),
             0x69 => self.ld(GeneralRegister::L, GeneralRegister::C),
@@ -865,24 +831,24 @@ impl Cpu {
             0x6B => self.ld(GeneralRegister::L, GeneralRegister::E),
             0x6C => self.ld(GeneralRegister::L, GeneralRegister::H),
             0x6D => self.ld(GeneralRegister::L, GeneralRegister::L),
-            0x6E => self.ld_r_rr(GeneralRegister::L, CombinedRegister::HL, None),
+            0x6E => self.ld_r_rr(mbc, GeneralRegister::L, CombinedRegister::HL, None),
             0x6F => self.ld(GeneralRegister::L, GeneralRegister::A),
 
-            0x70 => self.ld_rr_r(CombinedRegister::HL, GeneralRegister::B, None),
-            0x71 => self.ld_rr_r(CombinedRegister::HL, GeneralRegister::C, None),
-            0x72 => self.ld_rr_r(CombinedRegister::HL, GeneralRegister::D, None),
-            0x73 => self.ld_rr_r(CombinedRegister::HL, GeneralRegister::E, None),
-            0x74 => self.ld_rr_r(CombinedRegister::HL, GeneralRegister::H, None),
-            0x75 => self.ld_rr_r(CombinedRegister::HL, GeneralRegister::L, None),
+            0x70 => self.ld_rr_r(mbc, CombinedRegister::HL, GeneralRegister::B, None),
+            0x71 => self.ld_rr_r(mbc, CombinedRegister::HL, GeneralRegister::C, None),
+            0x72 => self.ld_rr_r(mbc, CombinedRegister::HL, GeneralRegister::D, None),
+            0x73 => self.ld_rr_r(mbc, CombinedRegister::HL, GeneralRegister::E, None),
+            0x74 => self.ld_rr_r(mbc, CombinedRegister::HL, GeneralRegister::H, None),
+            0x75 => self.ld_rr_r(mbc, CombinedRegister::HL, GeneralRegister::L, None),
             0x76 => self.not_implemented("HALT"),
-            0x77 => self.ld_rr_r(CombinedRegister::HL, GeneralRegister::A, None),
+            0x77 => self.ld_rr_r(mbc, CombinedRegister::HL, GeneralRegister::A, None),
             0x78 => self.ld(GeneralRegister::A, GeneralRegister::B),
             0x79 => self.ld(GeneralRegister::A, GeneralRegister::C),
             0x7A => self.ld(GeneralRegister::A, GeneralRegister::D),
             0x7B => self.ld(GeneralRegister::A, GeneralRegister::E),
             0x7C => self.ld(GeneralRegister::A, GeneralRegister::H),
             0x7D => self.ld(GeneralRegister::A, GeneralRegister::L),
-            0x7E => self.ld_r_rr(GeneralRegister::A, CombinedRegister::HL, None),
+            0x7E => self.ld_r_rr(mbc, GeneralRegister::A, CombinedRegister::HL, None),
             0x7F => self.ld(GeneralRegister::A, GeneralRegister::A),
 
             0x80 => self.add_register(GeneralRegister::B),
@@ -891,7 +857,7 @@ impl Cpu {
             0x83 => self.add_register(GeneralRegister::E),
             0x84 => self.add_register(GeneralRegister::H),
             0x85 => self.add_register(GeneralRegister::L),
-            0x86 => self.add_memory(),
+            0x86 => self.add_memory(mbc),
             0x87 => self.add_register(GeneralRegister::A),
             0x88 => self.not_implemented("ADC A, B"),
             0x89 => self.not_implemented("ADC A, C"),
@@ -908,7 +874,7 @@ impl Cpu {
             0x93 => self.sub_register(GeneralRegister::E),
             0x94 => self.sub_register(GeneralRegister::H),
             0x95 => self.sub_register(GeneralRegister::L),
-            0x96 => self.sub_hl(),
+            0x96 => self.sub_hl(mbc),
             0x97 => self.sub_register(GeneralRegister::A),
             0x98 => self.sbc_register(GeneralRegister::B),
             0x99 => self.sbc_register(GeneralRegister::C),
@@ -916,7 +882,7 @@ impl Cpu {
             0x9B => self.sbc_register(GeneralRegister::E),
             0x9C => self.sbc_register(GeneralRegister::H),
             0x9D => self.sbc_register(GeneralRegister::L),
-            0x9E => self.sbc_hl(),
+            0x9E => self.sbc_hl(mbc),
             0x9F => self.sbc_register(GeneralRegister::A),
 
             0xA0 => self.not_implemented("AND A, B"),
@@ -950,31 +916,29 @@ impl Cpu {
             0xBB => self.cp_register(GeneralRegister::E),
             0xBC => self.cp_register(GeneralRegister::H),
             0xBD => self.cp_register(GeneralRegister::L),
-            0xBE => self.cp_memory(
-                self.registers.get16(CombinedRegister::HL).into(),
-            ),
+            0xBE => self.cp_memory(mbc, self.registers.get16(CombinedRegister::HL).into()),
             0xBF => self.cp_register(GeneralRegister::A),
 
             0xC0 => self.not_implemented("RET NZ"),
             0xC1 => self.not_implemented("POP BC"),
-            0xC2 => self.jp_not(Some(FlagRegisterValue::Z)),
-            0xC3 => self.jp(None),
+            0xC2 => self.jp_not(mbc, Some(FlagRegisterValue::Z)),
+            0xC3 => self.jp(mbc, None),
             0xC4 => self.not_implemented("CALL NZ, u16"),
             0xC5 => self.not_implemented("PUSH BC"),
             0xC6 => self.not_implemented("ADD A, u8"),
             0xC7 => self.not_implemented("RST 00h"),
             0xC8 => self.not_implemented("RET Z"),
             0xC9 => self.not_implemented("RET"),
-            0xCA => self.jp(Some(FlagRegisterValue::Z)),
-            0xCB => self.prefix(),
+            0xCA => self.jp(mbc, Some(FlagRegisterValue::Z)),
+            0xCB => self.prefix(mbc),
             0xCC => self.not_implemented("CALL Z, u16"),
-            0xCD => self.call(),
+            0xCD => self.call(mbc),
             0xCE => self.not_implemented("ADC A, u8"),
             0xCF => self.not_implemented("RST 08h"),
 
             0xD0 => self.not_implemented("RET NC"),
             0xD1 => self.not_implemented("POP DE"),
-            0xD2 => self.jp_not(Some(FlagRegisterValue::C)),
+            0xD2 => self.jp_not(mbc, Some(FlagRegisterValue::C)),
             0xD3 => self.nothing(),
             0xD4 => self.not_implemented("CALL NC, u16"),
             0xD5 => self.not_implemented("PUSH DE"),
@@ -982,14 +946,14 @@ impl Cpu {
             0xD7 => self.not_implemented("RST 10h"),
             0xD8 => self.not_implemented("RET C"),
             0xD9 => self.not_implemented("RETI"),
-            0xDA => self.jp(Some(FlagRegisterValue::C)),
+            0xDA => self.jp(mbc, Some(FlagRegisterValue::C)),
             0xDB => self.nothing(),
             0xDC => self.not_implemented("CALL C, u16"),
             0xDD => self.nothing(),
             0xDE => self.not_implemented("SBC A, u8"),
             0xDF => self.not_implemented("RST 18h"),
 
-            0xE0 => self.ld_relative_memory_loc(),
+            0xE0 => self.ld_relative_memory_loc(mbc),
             0xE1 => self.not_implemented("POP HL"),
             0xE2 => self.not_implemented("LD (FF00+C), A"),
             0xE3 => self.nothing(),
@@ -999,7 +963,7 @@ impl Cpu {
             0xE7 => self.not_implemented("RST 20h"),
             0xE8 => self.not_implemented("ADD SP, i8"),
             0xE9 => self.not_implemented("JP HL"),
-            0xEA => self.ld_memory_loc(),
+            0xEA => self.ld_memory_loc(mbc),
             0xEB => self.nothing(),
             0xEC => self.nothing(),
             0xED => self.nothing(),
@@ -1020,7 +984,7 @@ impl Cpu {
             0xFB => self.ei(),
             0xFC => self.nothing(),
             0xFD => self.nothing(),
-            0xFE => self.cp_u8(),
+            0xFE => self.cp_next_8(mbc),
             0xFF => self.not_implemented("RST 38h"),
         }
     }

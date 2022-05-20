@@ -29,7 +29,7 @@ pub struct MBC {
     ram_enabled: bool,
     ram: BankedMemory,
     rom: BankedMemory,
-    video_ram: Vec<u8>,
+    pub video_ram: Vec<u8>,
     work_ram: Vec<u8>,
     sprite_attribute_table: Vec<u8>,
     io_registers: Vec<u8>,
