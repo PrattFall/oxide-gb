@@ -11,6 +11,7 @@ mod mbc;
 mod render;
 mod tile;
 mod utils;
+mod lcdc;
 mod video;
 
 use std::fs::File;

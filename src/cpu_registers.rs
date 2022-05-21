@@ -33,7 +33,7 @@ const ALL_REGISTERS: [GeneralRegister; 8] = [
     GeneralRegister::L,
 ];
 
-const ALL_COMBINED: [CombinedRegister; 4] = [
+const ALL_COMBINED_REGISTERS: [CombinedRegister; 4] = [
     CombinedRegister::AF,
     CombinedRegister::BC,
     CombinedRegister::DE,
@@ -121,15 +121,15 @@ impl Registers {
         self.get(GeneralRegister::F).is_bit_set(flag as u8)
     }
 
-    pub fn display(&self) -> String {
-        ALL_REGISTERS
-            .map(|r| format!("{:?} {:#04x}", r, self.get(r)))
-            .join(", ")
-    }
+    // pub fn display(&self) -> String {
+    //     ALL_REGISTERS
+    //         .map(|r| format!("{:?} {:#04x}", r, self.get(r)))
+    //         .join(", ")
+    // }
 
     pub fn display_combined(&self) -> String {
-        ALL_COMBINED
-            .map(|r| format!("{:?} {:04x}", r, self.get16(r)))
+        ALL_COMBINED_REGISTERS
+            .map(|r| format!("{:?} {:04x}", r, self.get_combined(r)))
             .join(", ")
     }
 }
