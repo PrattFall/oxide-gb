@@ -78,7 +78,7 @@ impl Registers {
         }
     }
 
-    pub fn get_combined(&self, register: CombinedRegister) -> u16 {
+    pub fn get16(&self, register: CombinedRegister) -> u16 {
         match register {
             CombinedRegister::AF => {
                 u8s_to_u16(self.get(GeneralRegister::A), self.get(GeneralRegister::F))

@@ -1,18 +1,5 @@
-// Gameboy Specs:
-// - 8kb Work-RAM
-// - Sharp LR35902
-// - Sharp SM83
-// - 8-bit data bus / 16-bit address bus
-//      - 64-kb of memory access
-//          - Cartridge space
-//          - WRAM and Display RAM
-//          - I/O (joypad, audio, graphics, and LCD)
-//          - Interrupt controls
-// - Resolution: 160x144
-// - 4 shades of grey
-
-use std::fs::File;
-use std::io;
+#[macro_use]
+extern crate glium;
 
 mod cartridge;
 mod cartridge_header;
@@ -20,37 +7,40 @@ mod cartridge_type;
 mod cpu;
 mod cpu_registers;
 mod flag_register;
-mod mbc1;
-mod memory_bank_controller;
-mod no_mbc;
+mod mbc;
+mod render;
+mod tile;
 mod utils;
 mod lcdc;
+mod video;
 
-use crate::cartridge_type::CartridgeType;
+use std::fs::File;
+use std::io;
+
+use crate::cartridge::Cartridge;
 use crate::cpu::Cpu;
-use crate::mbc1::MBC1;
-use crate::memory_bank_controller::MemoryBankController;
-use crate::no_mbc::NoMBC;
-
-pub fn make_controller(cartridge: cartridge::Cartridge) -> Box<dyn MemoryBankController> {
-    match cartridge.header.cartridge_type {
-        CartridgeType::MBC1 | CartridgeType::MBC1Ram | CartridgeType::MBC1RamBattery => {
-            Box::new(MBC1::from(cartridge))
-        }
-        _ => Box::new(NoMBC::from(cartridge)),
-    }
-}
+use crate::mbc::MBC;
+// use crate::render::render;
+use crate::video::Video;
 
 fn main() -> io::Result<()> {
-    let f = File::open("test_games/test.gb")?;
-    let cartridge = cartridge::Cartridge::from(f);
-    let mut memory = make_controller(cartridge);
+    let f = File::open("test_games/test.gb").unwrap();
+    let cartridge = Cartridge::from(f);
+    let mut memory = MBC::from(cartridge);
     let mut cpu = Cpu::default();
+    let v = Video { lcdc: 0b00001000 };
 
     // Skip over the Boot Rom
     cpu.program_counter = 0x100;
 
+    // render();
+
     loop {
-        cpu.apply_operation(&mut *memory);
+        {
+            cpu.apply_operation(&mut memory);
+        }
+
+        let tile = v.get_tile(memory.video_ram.clone(), 0);
+        println!("{:?}", tile);
     }
 }

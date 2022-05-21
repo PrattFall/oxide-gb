@@ -1,13 +1,35 @@
 use crate::cartridge::Cartridge;
 use crate::cartridge_header::RAM_BANK_SIZE;
-use crate::memory_bank_controller::{BankedMemory, MemoryBankController, ROM_BANK_SIZE};
+use crate::utils::u8s_to_u16;
 
-pub struct MBC1 {
+pub const ROM_BANK_SIZE: usize = 16000;
+
+pub struct BankedMemory {
+    pub active_bank: usize,
+    pub banks: Vec<Vec<u8>>,
+}
+
+impl BankedMemory {
+    pub fn value_at(&self, location: usize) -> u8 {
+        self.banks[self.active_bank][location]
+    }
+
+    pub fn value_in_bank(&self, bank: usize, location: usize) -> u8 {
+        self.banks[bank][location]
+    }
+
+    pub fn set_at(&mut self, location: usize, value: u8) {
+        self.banks[self.active_bank][location] = value;
+    }
+}
+
+
+pub struct MBC {
     banking_mode: u8, // Only need 2 bits
     ram_enabled: bool,
     ram: BankedMemory,
     rom: BankedMemory,
-    video_ram: Vec<u8>,
+    pub video_ram: Vec<u8>,
     work_ram: Vec<u8>,
     sprite_attribute_table: Vec<u8>,
     io_registers: Vec<u8>,
@@ -15,9 +37,9 @@ pub struct MBC1 {
     interrupt_enable_register: u8,
 }
 
-impl From<Cartridge> for MBC1 {
+impl From<Cartridge> for MBC {
     fn from(cartridge: Cartridge) -> Self {
-        MBC1 {
+        MBC {
             banking_mode: 0,
             ram_enabled: false,
             ram: match cartridge.header.ram_size {
@@ -48,8 +70,19 @@ impl From<Cartridge> for MBC1 {
     }
 }
 
-impl MemoryBankController for MBC1 {
-    fn write_memory(&mut self, location: usize, value: u8) {
+impl MBC {
+    pub fn get_next_u8(&self, from_location: usize) -> u8 {
+        self.read(from_location + 1)
+    }
+
+    pub fn get_next_u16(&self, from_location: usize) -> u16 {
+        u8s_to_u16(
+            self.read(from_location + 2),
+            self.read(from_location + 1),
+        )
+    }
+
+    pub fn write(&mut self, location: usize, value: u8) {
         match location {
             // Ram is enabled when the lowest 4 bits written to this range
             // are equal to 0x00a0
@@ -82,7 +115,7 @@ impl MemoryBankController for MBC1 {
         }
     }
 
-    fn read_memory(&self, location: usize) -> u8 {
+    pub fn read(&self, location: usize) -> u8 {
         match location {
             0x0000..=0x3fff => self.rom.value_in_bank(0, location),
             0x4000..=0x7fff => self.rom.value_at(location - 0x4000),
