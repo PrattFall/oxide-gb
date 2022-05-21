@@ -20,6 +20,10 @@ pub fn sub_should_half_carry(a: u8, b: u8) -> bool {
     (a & 0xf) < (b & 0xf)
 }
 
+// pub fn sub_16_should_half_carry(a: u16, b: u16) -> bool {
+//     (a & 0xfff) < (b & 0xfff)
+// }
+
 pub fn u8s_to_u16(x: u8, y: u8) -> u16 {
     ((x as u16) << 8) + (y as u16)
 }

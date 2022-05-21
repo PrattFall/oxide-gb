@@ -24,6 +24,7 @@ mod mbc1;
 mod memory_bank_controller;
 mod no_mbc;
 mod utils;
+mod lcdc;
 
 use crate::cartridge_type::CartridgeType;
 use crate::cpu::Cpu;

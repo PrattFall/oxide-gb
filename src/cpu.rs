@@ -395,6 +395,30 @@ impl Cpu {
         self.program_counter += 1;
     }
 
+    fn dec16(&mut self, register: CombinedRegister) {
+        let register_value = self.registers.get_combined(register);
+        let result = register_value.wrapping_sub(1);
+
+        self.registers.set_combined(register, result);
+
+        self.debug_op(&format!(
+            "Register {:?} Decreased to {:#06x}",
+            register, result
+        ));
+
+        self.program_counter += 1;
+    }
+
+    fn dec_sp(&mut self) {
+        let result = self.stack_pointer.wrapping_sub(1);
+
+        self.stack_pointer = result;
+
+        self.debug_op(&format!("Stack Pointer Decreased to {:#06x}", result));
+
+        self.program_counter += 1;
+    }
+
     fn add(&mut self, value: u8) {
         let a_value = self.registers.get(GeneralRegister::A);
         let result = a_value.wrapping_add(value);
@@ -919,7 +943,7 @@ impl Cpu {
             0x08 => self.ld_memory_from_sp(mbc),
             0x09 => self.add_combined_register(CombinedRegister::BC),
             0x0A => self.ld_r_rr(mbc, GeneralRegister::A, CombinedRegister::BC, None),
-            0x0B => self.not_implemented("DEC BC"),
+            0x0B => self.dec16(CombinedRegister::BC),
             0x0C => self.inc(GeneralRegister::C),
             0x0D => self.dec(GeneralRegister::C),
             0x0E => self.ld_next_8(mbc, GeneralRegister::C),
@@ -936,7 +960,7 @@ impl Cpu {
             0x18 => self.jr(mbc, None),
             0x19 => self.add_combined_register(CombinedRegister::DE),
             0x1A => self.ld_r_rr(mbc, GeneralRegister::A, CombinedRegister::DE, None),
-            0x1B => self.not_implemented("DEC DE"),
+            0x1B => self.dec16(CombinedRegister::DE),
             0x1C => self.inc(GeneralRegister::E),
             0x1D => self.dec(GeneralRegister::E),
             0x1E => self.ld_next_8(mbc, GeneralRegister::E),
@@ -963,7 +987,7 @@ impl Cpu {
                 CombinedRegister::HL,
                 Some(MemoryOffset::Plus),
             ),
-            0x2B => self.not_implemented("DEC HL"),
+            0x2B => self.dec16(CombinedRegister::HL),
             0x2C => self.inc(GeneralRegister::L),
             0x2D => self.dec(GeneralRegister::L),
             0x2E => self.ld_next_8(mbc, GeneralRegister::L),
@@ -990,7 +1014,7 @@ impl Cpu {
                 CombinedRegister::HL,
                 Some(MemoryOffset::Minus),
             ),
-            0x3B => self.not_implemented("DEC SP"),
+            0x3B => self.dec_sp(),
             0x3C => self.inc(GeneralRegister::A),
             0x3D => self.dec(GeneralRegister::A),
             0x3E => self.ld_next_8(mbc, GeneralRegister::A),

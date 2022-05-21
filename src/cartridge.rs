@@ -19,7 +19,7 @@ impl From<File> for Cartridge {
         let header = CartridgeHeader::from_binary(&cartridge_buffer);
 
         Cartridge {
-            header: header,
+            header,
             data: cartridge_buffer,
         }
     }
