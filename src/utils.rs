@@ -1,29 +1,5 @@
 use num;
 
-#[derive(PartialEq, Eq)]
-pub enum Mode {
-    Debug,
-    Production,
-}
-
-pub const MODE: Mode = Mode::Debug;
-
-pub fn add_should_half_carry(a: u8, b: u8) -> bool {
-    ((a & 0xf) + (b & 0xf) & 0x10) == 0x10
-}
-
-pub fn add_16_should_half_carry(a: u16, b: u16) -> bool {
-    (a & 0xfff) + (b & 0xfff) > 0xfff
-}
-
-pub fn sub_should_half_carry(a: u8, b: u8) -> bool {
-    (a & 0xf) < (b & 0xf)
-}
-
-// pub fn sub_16_should_half_carry(a: u16, b: u16) -> bool {
-//     (a & 0xfff) < (b & 0xfff)
-// }
-
 pub fn u8s_to_u16(x: u8, y: u8) -> u16 {
     ((x as u16) << 8) + (y as u16)
 }
@@ -36,33 +12,124 @@ pub trait BitWise<T: num::Integer> {
     fn is_bit_set(&self, bit: T) -> bool;
     fn set_bit(&self, bit: T) -> T;
     fn unset_bit(&self, bit: T) -> T;
+    fn toggle_bit(&self, bit: T, should_set: bool) -> T;
 }
 
 impl BitWise<u8> for u8 {
-    fn is_bit_set(&self, location: u8) -> bool {
-        self & location != 0
+    fn is_bit_set(&self, bit: u8) -> bool {
+        self & bit != 0
     }
 
-    fn set_bit(&self, location: u8) -> u8 {
-        self | location
+    fn set_bit(&self, bit: u8) -> u8 {
+        self | bit
     }
 
-    fn unset_bit(&self, location: u8) -> u8 {
-        self & !location
+    fn unset_bit(&self, bit: u8) -> u8 {
+        self & !bit
+    }
+
+    fn toggle_bit(&self, bit: u8, should_set: bool) -> u8 {
+        if should_set {
+            self.set_bit(bit)
+        } else {
+            self.unset_bit(bit)
+        }
+    }
+}
+
+pub trait Carryable<T: num::Integer> {
+    fn add_should_half_carry(&self, b: T) -> bool;
+    fn add_should_carry(&self, b: T) -> bool;
+    fn dec_should_half_carry(&self) -> bool;
+    fn inc_should_half_carry(&self) -> bool;
+    fn sub_should_half_carry(&self, b: T) -> bool;
+    fn sub_should_carry(&self, b: T) -> bool;
+}
+
+impl Carryable<u8> for u8 {
+    fn add_should_half_carry(&self, b: u8) -> bool {
+        ((self & 0xf) + (b & 0xf) & 0x10) == 0x10
+    }
+
+    fn add_should_carry(&self, b: u8) -> bool {
+        ((*self as u16 + b as u16) & 0x100) != 0
+    }
+
+    fn dec_should_half_carry(&self) -> bool {
+        self & 0x0f == 0x0f
+    }
+
+    fn inc_should_half_carry(&self) -> bool {
+        self & 0x0f == 0x00
+    }
+
+    fn sub_should_half_carry(&self, b: u8) -> bool {
+        ((self & 0xf) as i16).wrapping_sub((b & 0xf) as i16) < 0
+    }
+
+    fn sub_should_carry(&self, b: u8) -> bool {
+        &b > self
+    }
+}
+
+impl Carryable<u16> for u16 {
+    fn add_should_half_carry(&self, b: u16) -> bool {
+        (self & 0xfff) + (b & 0xfff) > 0xfff
+    }
+
+    fn add_should_carry(&self, b: u16) -> bool {
+        ((*self as u32 + b as u32) & 0x10000) != 0
+    }
+
+    fn dec_should_half_carry(&self) -> bool {
+        self & 0x0f == 0x0f
+    }
+
+    fn inc_should_half_carry(&self) -> bool {
+        self & 0x0f == 0x00
+    }
+
+    fn sub_should_half_carry(&self, b: u16) -> bool {
+        ((self & 0xfff) as i32).wrapping_sub((b & 0xfff) as i32) < 0
+    }
+
+    fn sub_should_carry(&self, b: u16) -> bool {
+        &b > self
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::utils::add_should_half_carry;
+    use crate::utils::{BitWise, Carryable};
 
     #[test]
     fn add_half_carry_check_10plus12() {
-        assert!(add_should_half_carry(10, 12));
+        assert!((10 as u8).add_should_half_carry(12));
     }
 
     #[test]
     fn add_half_carry_check_5plus4() {
-        assert!(!add_should_half_carry(5, 4));
+        assert!(!(5 as u8).add_should_half_carry(4));
+    }
+
+    #[test]
+    fn bitwise_is_bit_set_0() {
+        assert!(1.is_bit_set(1 << 0));
+    }
+
+    #[test]
+    fn bitwise_is_bit_set_1() {
+        assert!(2.is_bit_set(1 << 1))
+    }
+
+    #[test]
+    fn bitwise_is_bit_set_excludes_unset_bits() {
+        assert!(!2.is_bit_set(1 << 0));
+    }
+
+    #[test]
+    fn bitwise_is_bit_set_for_3() {
+        assert!(3.is_bit_set(1 << 0));
+        assert!(3.is_bit_set(1 << 1));
     }
 }

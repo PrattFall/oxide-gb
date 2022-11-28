@@ -2,6 +2,7 @@ use bitflags::bitflags;
 use std::ops::RangeInclusive;
 
 bitflags! {
+    #[derive(Default)]
     pub struct LCDC: u8 {
         const BG_AND_WINDOW_ENABLE         = 1 << 0;
         const OBJ_ENABLE                   = 1 << 1;

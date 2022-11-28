@@ -33,20 +33,21 @@ const ALL_REGISTERS: [GeneralRegister; 8] = [
     GeneralRegister::L,
 ];
 
-const ALL_COMBINED_REGISTERS: [CombinedRegister; 4] = [
-    CombinedRegister::AF,
-    CombinedRegister::BC,
-    CombinedRegister::DE,
-    CombinedRegister::HL,
-];
+// const ALL_COMBINED_REGISTERS: [CombinedRegister; 4] = [
+//     CombinedRegister::AF,
+//     CombinedRegister::BC,
+//     CombinedRegister::DE,
+//     CombinedRegister::HL,
+// ];
 
 pub struct Registers {
     registers: HashMap<GeneralRegister, u8>,
 }
 
 impl Registers {
-    pub fn set(&mut self, register: GeneralRegister, value: u8) {
+    pub fn set(&mut self, register: GeneralRegister, value: u8) -> &mut Self {
         self.registers.insert(register, value);
+        self
     }
 
     pub fn get(&self, register: GeneralRegister) -> u8 {
@@ -55,7 +56,7 @@ impl Registers {
         *self.registers.get(&register).unwrap_or(&0)
     }
 
-    pub fn set_combined(&mut self, register: CombinedRegister, value: u16) {
+    pub fn set16(&mut self, register: CombinedRegister, value: u16) -> &mut Self {
         let [left, right] = u16_to_u8s(value);
 
         match register {
@@ -76,6 +77,8 @@ impl Registers {
                 self.set(GeneralRegister::L, right);
             }
         }
+
+        self
     }
 
     pub fn get16(&self, register: CombinedRegister) -> u16 {
@@ -95,26 +98,32 @@ impl Registers {
         }
     }
 
-    pub fn set_flag(&mut self, flag: FlagRegisterValue) {
+    pub fn set_flag(&mut self, flag: FlagRegisterValue) -> &mut Self {
         self.set(
             GeneralRegister::F,
             self.get(GeneralRegister::F).set_bit(flag as u8),
         );
+
+        self
     }
 
-    pub fn unset_flag(&mut self, flag: FlagRegisterValue) {
+    pub fn unset_flag(&mut self, flag: FlagRegisterValue) -> &mut Self {
         self.set(
             GeneralRegister::F,
             self.get(GeneralRegister::F).unset_bit(flag as u8),
-        )
+        );
+
+        self
     }
 
-    pub fn toggle_flag(&mut self, flag: FlagRegisterValue, should_set: bool) {
+    pub fn toggle_flag(&mut self, flag: FlagRegisterValue, should_set: bool) -> &mut Self {
         if should_set {
             self.set_flag(flag);
         } else {
             self.unset_flag(flag);
         }
+
+        self
     }
 
     pub fn is_flag_set(&self, flag: FlagRegisterValue) -> bool {
@@ -127,11 +136,11 @@ impl Registers {
     //         .join(", ")
     // }
 
-    pub fn display_combined(&self) -> String {
-        ALL_COMBINED_REGISTERS
-            .map(|r| format!("{:?} {:04x}", r, self.get_combined(r)))
-            .join(", ")
-    }
+    // pub fn display_combined(&self) -> String {
+    //     ALL_COMBINED_REGISTERS
+    //         .map(|r| format!("{:?} {:04x}", r, self.get16(r)))
+    //         .join(", ")
+    // }
 }
 
 impl Default for Registers {

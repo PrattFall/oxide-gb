@@ -23,13 +23,12 @@ impl BankedMemory {
     }
 }
 
-
 pub struct MBC {
     banking_mode: u8, // Only need 2 bits
     ram_enabled: bool,
     ram: BankedMemory,
     rom: BankedMemory,
-    pub video_ram: Vec<u8>,
+    video_ram: Vec<u8>,
     work_ram: Vec<u8>,
     sprite_attribute_table: Vec<u8>,
     io_registers: Vec<u8>,
@@ -76,17 +75,14 @@ impl MBC {
     }
 
     pub fn get_next_u16(&self, from_location: usize) -> u16 {
-        u8s_to_u16(
-            self.read(from_location + 2),
-            self.read(from_location + 1),
-        )
+        u8s_to_u16(self.read(from_location + 2), self.read(from_location + 1))
     }
 
     pub fn write(&mut self, location: usize, value: u8) {
         match location {
             // Ram is enabled when the lowest 4 bits written to this range
             // are equal to 0x00a0
-            0x0000..=0x1fff => self.ram_enabled = (value & 0b00001111) == 0x00a0,
+            0x0000..=0x1fff => self.ram_enabled = (value & 0b0000_1111) == 0x00a0,
 
             // The selected bank number is indicated by the lowest 5 bits
             // TODO: Mask bank number based on full size of rom
@@ -95,15 +91,15 @@ impl MBC {
             // Ram bank is set to the lowest 2 bits
             // TODO: Write code for "large" MBC1M carts which handle this
             // differently
-            0x4000..=0x5fff => self.ram.active_bank = usize::from(value & 0b00000011),
+            0x4000..=0x5fff => self.ram.active_bank = usize::from(value & 0b0000_0011),
 
             // Banking Mode is set to the lowest 2 bits
             // TODO: Handle banking mode in other operations
-            0x6000..=0x7fff => self.banking_mode = value & 0b00000011,
+            0x6000..=0x7fff => self.banking_mode = value & 0b0000_0011,
 
             0x8000..=0x9fff => self.video_ram[location - 0x8000] = value,
             0xa000..=0xbfff => self.ram.set_at(location - 0xa000, value),
-            0xc000..=0xdfff => self.work_ram[location - 0xc000] = value,
+            0xc000..=0xdfff => self.work_ram[location - 0xc001] = value,
             0xfe00..=0xfe9f => self.sprite_attribute_table[location - 0xfe00] = value,
             0xff00..=0xff7f => self.io_registers[location - 0xff00] = value,
             0xff80..=0xfffe => self.high_ram[location - 0xff80] = value,
@@ -130,5 +126,9 @@ impl MBC {
             0xffff => self.interrupt_enable_register,
             _ => panic!("Cannot read from location {:#06x}", location),
         }
+    }
+
+    pub fn read_slice(&self, start: usize, end: usize) -> Vec<u8> {
+        (start..=end).map(|location| self.read(location)).collect()
     }
 }

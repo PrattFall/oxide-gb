@@ -39,6 +39,35 @@ fn build_vertex_buffer(display: &glium::Display) -> glium::VertexBuffer<Vertex> 
     .unwrap()
 }
 
+const VERTEX_SHADER_140: &'static str = "
+#version 140
+
+uniform mat4 matrix;
+
+in vec2 position;
+in vec2 tex_coords;
+
+out vec2 v_tex_coords;
+
+void main() {
+    gl_Position = matrix * vec4(position, 0.0, 1.0);
+    v_tex_coords = tex_coords;
+}
+";
+
+const FRAGMENT_SHADER_140: &'static str = "
+#version 140
+
+uniform sampler2D tex;
+
+in vec2 v_tex_coords;
+out vec4 f_color;
+
+void main() {
+    f_color = texture(tex, v_tex_coords);
+}
+";
+
 pub fn render() {
     let event_loop = glutin::event_loop::EventLoop::new();
     let wb = glutin::window::WindowBuilder::new()
@@ -55,33 +84,8 @@ pub fn render() {
     let program = program!(
         &display,
         140 => {
-            vertex: "
-                #version 140
-
-                uniform mat4 matrix;
-
-                in vec2 position;
-                in vec2 tex_coords;
-
-                out vec2 v_tex_coords;
-
-                void main() {
-                    gl_Position = matrix * vec4(position, 0.0, 1.0);
-                    v_tex_coords = tex_coords;
-                }
-            ",
-            fragment: "
-                #version 140
-
-                uniform sampler2D tex;
-
-                in vec2 v_tex_coords;
-                out vec4 f_color;
-
-                void main() {
-                    f_color = texture(tex, v_tex_coords);
-                }
-            "
+            vertex: VERTEX_SHADER_140,
+            fragment: FRAGMENT_SHADER_140
         }
     )
     .unwrap();
@@ -90,7 +94,8 @@ pub fn render() {
     let blank_pixels = vec![row; 144];
 
     let pixel_buffer = glium::texture::pixel_buffer::PixelBuffer::new_empty(&display, 160 * 144);
-    let screen_texture = glium::texture::texture2d::Texture2d::new(&display, blank_pixels.clone()).unwrap();
+    let screen_texture =
+        glium::texture::texture2d::Texture2d::new(&display, blank_pixels.clone()).unwrap();
 
     event_loop.run(move |event, _, control_flow| {
         let pixels = blank_pixels.clone().concat();

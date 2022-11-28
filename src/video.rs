@@ -1,3 +1,5 @@
+use crate::lcdc::LCDC;
+use crate::mbc::MBC;
 use crate::utils::BitWise;
 
 pub type Pixel = (u8, u8, u8, u8);
@@ -9,43 +11,55 @@ pub const LIGHTEST_GREEN: Pixel = (155, 188, 15, 0);
 
 const TILE_SIZE_BYTES: u8 = 16;
 
+type Tile = [[Pixel; 8]; 8];
+type TileDictionary = [Tile; 256];
+
 pub struct Video {
-    pub lcdc: u8,
+    pub lcdc: LCDC,
+    tiles: TileDictionary,
 }
 
-
 impl Video {
+    pub fn new() -> Self {
+        Video {
+            lcdc: LCDC::default(),
+            tiles: [[[LIGHTEST_GREEN; 8]; 8]; 256]
+        }
+    }
+
+    fn build_tile_map(ram: MBC, tile_index: u8) -> (Vec<Tile>, Vec<Tile>) {
+        (vec![], vec![])
+    }
+
+    pub fn collect_tiles(&self, ram: &MBC) {
+        for i in 0..256 {
+            self.tiles[i] = self.get_tile(&ram, i as u8)
+        }
+    }
+
     fn tile_row(b1: u8, b2: u8) -> Vec<Pixel> {
-        (0..8)
-            .enumerate()
+        (0..8u8)
             .map(
-                |(i, _)| match (b2.is_bit_set(i as u8), b1.is_bit_set(i as u8)) {
+                |i| match (b2.is_bit_set(i), b1.is_bit_set(i)) {
                     (true, true) => LIGHTEST_GREEN,
                     (true, false) => LIGHT_GREEN,
                     (false, true) => DARK_GREEN,
                     (false, false) => DARKEST_GREEN,
                 },
-                )
+            )
             .collect()
     }
 
-    pub fn get_tile(&self, video_ram: Vec<u8>, tile_index: u8) -> Vec<Vec<Pixel>> {
-        let prefix = if self.lcdc.is_bit_set(4) {
-            0x0000
-        } else {
-            0x1000
-        };
-
+    // TODO: Actually handle i8 when lcdc.4 is active
+    fn get_tile(&self, ram: &MBC, tile_index: u8) -> Tile {
+        let prefix = *self.lcdc.bg_and_window_tile_data_area().start() as usize;
         let vram_start = prefix + (tile_index * TILE_SIZE_BYTES) as usize;
         let vram_offset = vram_start + TILE_SIZE_BYTES as usize;
 
-        video_ram[vram_start..vram_offset]
+        ram.read_slice(vram_start, vram_offset)
             .chunks(2)
             .map(|chunk| match chunk {
-                [b1, b2] => {
-                    println!("thing");
-                    Video::tile_row(*b1, *b2)
-                }
+                [b1, b2] => Video::tile_row(*b1, *b2),
                 _ => {
                     panic!("Uneven bytes found when accessing tile")
                 }

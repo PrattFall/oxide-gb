@@ -1,11 +1,11 @@
 use crate::cpu_registers::{CombinedRegister, GeneralRegister, Registers};
 use crate::flag_register::FlagRegisterValue;
 use crate::mbc::MBC;
-use crate::utils::{
-    add_16_should_half_carry, add_should_half_carry, sub_should_half_carry, u16_to_u8s, BitWise,
-};
+use crate::utils::{u16_to_u8s, BitWise, Carryable};
+// use std::collections::HashSet;
 
 // const CLOCK_MHZ: f64 = 4.194304;
+// FLAGS = (Z)ero, (N)egative, (H)alf Carry, (C)arry
 
 #[derive(Default)]
 pub struct Cpu {
@@ -14,6 +14,8 @@ pub struct Cpu {
     pub registers: Registers,
     pub interrupts_enabled: bool,
     pub current_op: u8,
+    // pub ops_used: HashSet<u8>,
+    count: u64,
 }
 
 pub enum MemoryOffset {
@@ -21,11 +23,33 @@ pub enum MemoryOffset {
     Minus,
 }
 
+#[cfg_attr(rustfmt, rustfmt_skip)]
+const OP_CYCLES_BYTES: [u8; 256] = [
+    1, 3, 1, 1, 1, 1, 2, 1, 3, 1, 1, 1, 1, 1, 2, 1,
+    2, 3, 1, 1, 1, 1, 2, 1, 2, 1, 1, 1, 1, 1, 2, 1,
+    2, 3, 1, 1, 1, 1, 2, 1, 2, 1, 1, 1, 1, 1, 2, 1,
+    2, 3, 1, 1, 1, 1, 2, 1, 2, 1, 1, 1, 1, 1, 2, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 3, 3, 3, 1, 2, 1, 1, 1, 3, 0, 3, 3, 2, 1,
+    1, 1, 3, 0, 3, 1, 2, 1, 1, 1, 3, 0, 3, 0, 2, 1,
+    2, 1, 1, 0, 0, 1, 2, 1, 2, 1, 3, 0, 0, 0, 2, 1,
+    2, 1, 1, 1, 0, 1, 2, 1, 2, 1, 3, 1, 0, 0, 2, 1
+];
+
 impl Cpu {
+    /// Represents an unused CPU instruction. Not to be confused with NOP
     fn nothing(&mut self) {
         self.program_counter += 1;
     }
 
+    /// An explicit "nothing" instruction to the CPU
     fn nop(&mut self) {
         self.program_counter += 1;
     }
@@ -33,15 +57,110 @@ impl Cpu {
     fn not_implemented(&mut self, message: &str) {
         // Hunting for Not Implementeds now
         panic!("TODO: {}", message);
+    }
 
-        // self.program_counter += 1;
+    fn add_inner(&mut self, value: u8) {
+        let a_value = self.registers.get(GeneralRegister::A);
+        let result = a_value.wrapping_add(value);
+
+        self.registers
+            .set(GeneralRegister::A, result)
+            .toggle_flag(FlagRegisterValue::Z, result == 0)
+            .unset_flag(FlagRegisterValue::N)
+            .toggle_flag(FlagRegisterValue::H, a_value.add_should_half_carry(value))
+            .toggle_flag(FlagRegisterValue::C, a_value.add_should_carry(value));
+    }
+
+    fn add_a_r(&mut self, register: GeneralRegister) {
+        let value = self.registers.get(register);
+
+        self.add_inner(value);
+
+        self.program_counter += 1;
+    }
+
+    fn add_a_hl_loc(&mut self, mbc: &MBC) {
+        let value = mbc.read(self.registers.get16(CombinedRegister::HL).into());
+
+        self.add_inner(value);
+
+        self.program_counter += 1;
+    }
+
+    fn add_16_inner(&mut self, value: u16) {
+        let hl_val = self.registers.get16(CombinedRegister::HL);
+        let result = hl_val.wrapping_add(value);
+
+        self.registers
+            .set16(CombinedRegister::HL, result)
+            .unset_flag(FlagRegisterValue::N)
+            .toggle_flag(FlagRegisterValue::H, hl_val.add_should_half_carry(value))
+            .toggle_flag(FlagRegisterValue::C, hl_val.add_should_carry(value));
+    }
+
+    fn add_combined_register(&mut self, register: CombinedRegister) {
+        let register_value = self.registers.get16(register);
+
+        self.add_16_inner(register_value);
+
+        self.program_counter += 1;
+    }
+
+    fn add_sp(&mut self) {
+        self.add_16_inner(self.stack_pointer);
+
+        self.program_counter += 1;
+    }
+
+    fn bit(&mut self, bit: u8, value: u8) {
+        self.registers
+            .toggle_flag(FlagRegisterValue::Z, !value.is_bit_set(1 << bit))
+            .unset_flag(FlagRegisterValue::N)
+            .set_flag(FlagRegisterValue::H);
+    }
+
+    fn bit_register(&mut self, bit: u8, register: GeneralRegister) {
+        let value = self.registers.get(register);
+        self.bit(bit, value);
+    }
+
+    fn bit_memory(&mut self, mbc: &MBC, bit: u8) {
+        let value = mbc.read(self.registers.get16(CombinedRegister::HL).into());
+        self.bit(bit, value);
+    }
+
+    fn call(&mut self, mbc: &mut MBC) {
+        let call_location = mbc.get_next_u16(self.program_counter.into());
+        let [left, right] = u16_to_u8s(self.program_counter);
+
+        self.stack_pointer = self.stack_pointer.wrapping_sub(2);
+
+        mbc.write(self.stack_pointer.into(), left);
+        mbc.write((self.stack_pointer + 1).into(), right);
+
+        self.program_counter = call_location;
+    }
+
+    fn cpl(&mut self) {
+        self.registers
+            .set(
+                GeneralRegister::A,
+                self.registers.get(GeneralRegister::A) ^ 0xFF,
+            )
+            .set_flag(FlagRegisterValue::N)
+            .set_flag(FlagRegisterValue::H);
+
+        self.program_counter += 1;
     }
 
     fn cp_val(&mut self, value: u8) {
         let a_val = self.registers.get(GeneralRegister::A);
 
         self.registers
-            .toggle_flag(FlagRegisterValue::Z, a_val.wrapping_sub(value) == 0);
+            .toggle_flag(FlagRegisterValue::Z, a_val.wrapping_sub(value) == 0)
+            .set_flag(FlagRegisterValue::N)
+            .toggle_flag(FlagRegisterValue::H, a_val.sub_should_half_carry(value))
+            .toggle_flag(FlagRegisterValue::C, a_val.sub_should_carry(value));
     }
 
     fn cp_memory(&mut self, mbc: &MBC, location: usize) {
@@ -54,6 +173,13 @@ impl Cpu {
 
     fn cp_next_8(&mut self, mbc: &MBC) {
         let value = mbc.get_next_u8(self.program_counter.into());
+
+        println!(
+            "    CP location {:#06x} ({:#04x}): {:#04x}",
+            self.program_counter,
+            value,
+            self.registers.get(GeneralRegister::A)
+        );
 
         self.cp_val(value);
 
@@ -68,21 +194,45 @@ impl Cpu {
         self.program_counter += 1;
     }
 
-    fn inc(&mut self, register: GeneralRegister) {
-        let register_value = self.registers.get(register);
-        let result = register_value.wrapping_add(1);
-
-        self.registers.unset_flag(FlagRegisterValue::N);
+    fn dec(&mut self, register: GeneralRegister) {
+        let value = self.registers.get(register);
+        let result = value.wrapping_sub(1);
 
         self.registers
-            .toggle_flag(FlagRegisterValue::Z, result == 0);
+            .set(register, result)
+            .toggle_flag(FlagRegisterValue::Z, result == 0)
+            .set_flag(FlagRegisterValue::N)
+            .toggle_flag(FlagRegisterValue::H, result.dec_should_half_carry());
 
-        self.registers.toggle_flag(
-            FlagRegisterValue::H,
-            add_should_half_carry(self.registers.get(register), 1),
-        );
+        self.program_counter += 1;
+    }
 
-        self.registers.set(register, result);
+    fn dec16(&mut self, register: CombinedRegister) {
+        let value = self.registers.get16(register);
+        let result = value.wrapping_sub(1);
+
+        self.registers.set16(register, result);
+
+        self.program_counter += 1;
+    }
+
+    fn dec_sp(&mut self) {
+        let result = self.stack_pointer.wrapping_sub(1);
+
+        self.stack_pointer = result;
+
+        self.program_counter += 1;
+    }
+
+    fn inc(&mut self, register: GeneralRegister) {
+        let value = self.registers.get(register);
+        let result = value.wrapping_add(1);
+
+        self.registers
+            .toggle_flag(FlagRegisterValue::Z, result == 0)
+            .unset_flag(FlagRegisterValue::N)
+            .toggle_flag(FlagRegisterValue::H, result.inc_should_half_carry())
+            .set(register, result);
 
         self.program_counter += 1;
     }
@@ -90,9 +240,71 @@ impl Cpu {
     fn inc16(&mut self, register: CombinedRegister) {
         let register_value = self.registers.get16(register);
         let result = register_value.wrapping_add(1);
-        self.registers.set_combined(register, result);
+
+        self.registers.set16(register, result);
 
         self.program_counter += 1;
+    }
+
+    fn jp_inner(&mut self, mbc: &MBC) {
+        let jump_location = mbc.get_next_u16(self.program_counter.into());
+
+        self.program_counter = jump_location;
+    }
+
+    fn jp(&mut self, mbc: &MBC, flag: Option<FlagRegisterValue>) {
+        match flag {
+            Some(f) => {
+                if !self.registers.is_flag_set(f) {
+                    self.program_counter += 2;
+                } else {
+                    self.jp_inner(mbc);
+                }
+            }
+            _ => {
+                self.jp_inner(mbc);
+            }
+        }
+    }
+
+    fn jp_not(&mut self, mbc: &MBC, flag: Option<FlagRegisterValue>) {
+        match flag {
+            Some(f) => {
+                if self.registers.is_flag_set(f) {
+                    self.program_counter += 2;
+                } else {
+                    self.jp_inner(mbc);
+                }
+            }
+            _ => {
+                self.jp_inner(mbc);
+            }
+        }
+    }
+
+    fn jr_base(&mut self, mbc: &MBC) {
+        let relative_location = mbc.get_next_u8(self.program_counter.into()) as i8;
+
+        let abs_location = self.program_counter.wrapping_add(relative_location as u16) as u16;
+
+        // It increments to pull the relative location so we're adding 2 here
+        self.program_counter = abs_location + 2;
+    }
+
+    fn jrf(&mut self, mbc: &MBC, flag: FlagRegisterValue) {
+        if self.registers.is_flag_set(flag) {
+            self.jr_base(mbc)
+        } else {
+            self.program_counter += 2;
+        }
+    }
+
+    fn jrf_not(&mut self, mbc: &MBC, flag: FlagRegisterValue) {
+        if self.registers.is_flag_set(flag) {
+            self.program_counter += 2;
+        } else {
+            self.jr_base(mbc);
+        }
     }
 
     fn ld(&mut self, a: GeneralRegister, b: GeneralRegister) {
@@ -113,7 +325,7 @@ impl Cpu {
     fn ld_next_16(&mut self, mbc: &MBC, register: CombinedRegister) {
         let value = mbc.get_next_u16(self.program_counter.into());
 
-        self.registers.set_combined(register, value);
+        self.registers.set16(register, value);
 
         self.program_counter += 3;
     }
@@ -152,12 +364,33 @@ impl Cpu {
         self.program_counter += 3;
     }
 
-    fn ld_relative_memory_loc(&mut self, mbc: &MBC) {
+    fn ld_relative_memory_loc(&mut self, mbc: &mut MBC) {
         let location = mbc.get_next_u8(self.program_counter.into());
-        let value = mbc.read((0xff00 + location as u16).into());
+        let value = self.registers.get(GeneralRegister::A);
+
+        mbc.write(location.into(), value);
+
+        self.program_counter += 2;
+    }
+
+    fn ld_relative_memory_to_a(&mut self, mbc: &MBC) {
+        let location = mbc.get_next_u8(self.program_counter.into()) as u16;
+        let updated_location = 0xff00 + location;
+        let value = mbc.read(updated_location.into());
+
+        println!("    Read location: {:#06x} (pc: {:#06x}) | value: {:#04x}", updated_location, self.program_counter, value);
+
         self.registers.set(GeneralRegister::A, value);
 
         self.program_counter += 2;
+    }
+
+    fn offset_location(&self, location: u16, offset: Option<MemoryOffset>) -> u16 {
+        match offset {
+            None => location,
+            Some(MemoryOffset::Plus) => location.wrapping_add(1),
+            Some(MemoryOffset::Minus) => location.wrapping_sub(1),
+        }
     }
 
     fn ld_rr_r(
@@ -168,9 +401,12 @@ impl Cpu {
         offset: Option<MemoryOffset>,
     ) {
         let value = self.registers.get(register);
-        let memory_location = self.read_with_offset(location, offset);
+        let memory_location = self.registers.get16(location);
 
         mbc.write(memory_location.into(), value);
+
+        self.registers
+            .set16(location, self.offset_location(memory_location, offset));
 
         self.program_counter += 1;
     }
@@ -182,233 +418,99 @@ impl Cpu {
         location: CombinedRegister,
         offset: Option<MemoryOffset>,
     ) {
-        let memory_location = self.read_with_offset(location, offset);
+        let memory_location = self.registers.get16(location);
         let value = mbc.read(memory_location.into());
 
         self.registers.set(register, value);
 
-        self.program_counter += 1;
-    }
-
-    fn call(&mut self, mbc: &mut MBC) {
-        let call_location = mbc.get_next_u16(self.program_counter.into());
-        let [left, right] = u16_to_u8s(self.program_counter);
-
-        self.stack_pointer = self.stack_pointer.wrapping_sub(2);
-        mbc.write(self.stack_pointer.into(), left);
-        mbc.write((self.stack_pointer + 1).into(), right);
-
-        self.program_counter = call_location;
-    }
-
-    fn cpl(&mut self) {
-        self.registers.set(
-            GeneralRegister::A,
-            self.registers.get(GeneralRegister::A) ^ 0xFF,
-        );
-
-        self.registers.set_flag(FlagRegisterValue::N);
-        self.registers.set_flag(FlagRegisterValue::H);
+        self.registers
+            .set16(location, self.offset_location(memory_location, offset));
 
         self.program_counter += 1;
     }
 
-    fn jp(&mut self, mbc: &MBC, flag: Option<FlagRegisterValue>) {
-        match flag {
-            Some(f) if !self.registers.is_flag_set(f) => {
-                self.program_counter += 2;
-            }
-            _ => {
-                let jump_location = mbc.get_next_u16(self.program_counter.into());
-
-                self.program_counter = jump_location;
-            }
-        }
-    }
-
-    fn jp_not(&mut self, mbc: &MBC, flag: Option<FlagRegisterValue>) {
-        match flag {
-            Some(f) if self.registers.is_flag_set(f) => {
-                self.program_counter += 2;
-            }
-            _ => {
-                let jump_location = mbc.get_next_u16(self.program_counter.into());
-
-                self.program_counter = jump_location;
-            }
-        }
-    }
-
-    fn jr_base(&mut self, mbc: &MBC) {
-        let relative_location_u8 = mbc.get_next_u8(self.program_counter.into());
-        let relative_location = relative_location_u8 as i8;
-        let abs_location = self.program_counter.wrapping_add(relative_location as u16);
-
-        self.program_counter = abs_location;
-    }
-
-    fn jr(&mut self, mbc: &MBC, flag: Option<FlagRegisterValue>) {
-        match flag {
-            Some(f) if !self.registers.is_flag_set(f) => {
-                self.program_counter += 2;
-            }
-            _ => {
-                self.jr_base(mbc);
-            }
-        }
-    }
-
-    fn jr_not(&mut self, mbc: &MBC, flag: Option<FlagRegisterValue>) {
-        match flag {
-            Some(f) if self.registers.is_flag_set(f) => {
-                self.program_counter += 2;
-            }
-            _ => {
-                self.jr_base(mbc);
-            }
-        }
-    }
-
-    fn dec(&mut self, register: GeneralRegister) {
-        let register_value = self.registers.get(register);
-        let result = register_value.wrapping_sub(1);
-
-        self.registers.set_flag(FlagRegisterValue::N);
-
-        self.registers.toggle_flag(
-            FlagRegisterValue::H,
-            sub_should_half_carry(register_value, 1),
-        );
+    fn rla(&mut self) {
+        let value = self.registers.get(GeneralRegister::A);
+        let result = value
+            .rotate_left(1)
+            .toggle_bit(0, self.registers.is_flag_set(FlagRegisterValue::C));
 
         self.registers
-            .toggle_flag(FlagRegisterValue::Z, result == 0);
+            .toggle_flag(FlagRegisterValue::C, value.is_bit_set(1 << 7))
+            .unset_flag(FlagRegisterValue::Z)
+            .unset_flag(FlagRegisterValue::H)
+            .unset_flag(FlagRegisterValue::N)
+            .set(GeneralRegister::A, result);
+    }
+
+    // specialized from rlc because the flags are set differently
+    fn rlca(&mut self) {
+        let value = self.registers.get(GeneralRegister::A);
+        let result = value.rotate_left(1);
+        self.registers.set(GeneralRegister::A, result);
+
+        self.registers
+            .toggle_flag(FlagRegisterValue::C, value.is_bit_set(1 << 7))
+            .unset_flag(FlagRegisterValue::Z)
+            .unset_flag(FlagRegisterValue::H)
+            .unset_flag(FlagRegisterValue::N);
+
+        self.program_counter += 1;
+    }
+
+    fn rlc(&mut self, value: u8) -> u8 {
+        let result = value.rotate_left(1);
+
+        self.registers
+            .toggle_flag(FlagRegisterValue::C, value.is_bit_set(1 << 7))
+            .toggle_flag(FlagRegisterValue::Z, result == 0)
+            .unset_flag(FlagRegisterValue::H)
+            .unset_flag(FlagRegisterValue::N);
+
+        result
+    }
+
+    fn rra(&mut self) {
+        let value = self.registers.get(GeneralRegister::A);
+        let result = value
+            .rotate_right(1)
+            .toggle_bit(7, self.registers.is_flag_set(FlagRegisterValue::C));
+
+        self.registers
+            .toggle_flag(FlagRegisterValue::C, value.is_bit_set(0))
+            .unset_flag(FlagRegisterValue::Z)
+            .unset_flag(FlagRegisterValue::H)
+            .unset_flag(FlagRegisterValue::N)
+            .set(GeneralRegister::A, result);
+    }
+
+    fn rrca(&mut self) {
+        let value = self.registers.get(GeneralRegister::A);
+        let result = value.rotate_right(1);
+        self.registers.set(GeneralRegister::A, result);
+
+        self.registers
+            .toggle_flag(FlagRegisterValue::C, value.is_bit_set(1 << 0))
+            .unset_flag(FlagRegisterValue::Z)
+            .unset_flag(FlagRegisterValue::H)
+            .unset_flag(FlagRegisterValue::N);
+
+        self.program_counter += 1;
+    }
+
+    fn rlc_register(&mut self, register: GeneralRegister) {
+        let value = self.registers.get(register);
+        let result = self.rlc(value);
 
         self.registers.set(register, result);
-
-        self.program_counter += 1;
     }
 
-    fn dec16(&mut self, register: CombinedRegister) {
-        let register_value = self.registers.get_combined(register);
-        let result = register_value.wrapping_sub(1);
+    fn rlc_memory(&mut self, mbc: &mut MBC) {
+        let location: usize = self.registers.get16(CombinedRegister::HL).into();
+        let value = mbc.read(location);
+        let result = self.rlc(value);
 
-        self.registers.set_combined(register, result);
-
-        self.debug_op(&format!(
-            "Register {:?} Decreased to {:#06x}",
-            register, result
-        ));
-
-        self.program_counter += 1;
-    }
-
-    fn dec_sp(&mut self) {
-        let result = self.stack_pointer.wrapping_sub(1);
-
-        self.stack_pointer = result;
-
-        self.debug_op(&format!("Stack Pointer Decreased to {:#06x}", result));
-
-        self.program_counter += 1;
-    }
-
-    fn add(&mut self, value: u8) {
-        let a_value = self.registers.get(GeneralRegister::A);
-        let result = a_value.wrapping_add(value);
-
-        self.registers.set(GeneralRegister::A, result);
-
-        self.registers.unset_flag(FlagRegisterValue::N);
-
-        self.registers
-            .toggle_flag(FlagRegisterValue::C, 0xff - a_value < value);
-
-        self.registers
-            .toggle_flag(FlagRegisterValue::H, add_should_half_carry(a_value, value));
-
-        self.registers
-            .toggle_flag(FlagRegisterValue::Z, result == 0);
-    }
-
-    fn add_register(&mut self, register: GeneralRegister) {
-        let r_val = self.registers.get(register);
-
-        self.add(r_val);
-
-        self.program_counter += 1;
-    }
-
-    fn add_memory(&mut self, mbc: &MBC) {
-        let value = mbc.read(self.registers.get16(CombinedRegister::HL).into());
-
-        self.add(value);
-
-        self.program_counter += 1;
-    }
-
-    fn add_16(&mut self, value: u16) {
-        let hl_val = self.registers.get16(CombinedRegister::HL);
-        let result = hl_val.wrapping_add(value);
-
-        self.registers.set_combined(CombinedRegister::HL, result);
-
-        self.registers.unset_flag(FlagRegisterValue::N);
-
-        self.registers.toggle_flag(
-            FlagRegisterValue::H,
-            add_16_should_half_carry(hl_val, value),
-        );
-
-        self.registers
-            .toggle_flag(FlagRegisterValue::C, 0xffff - hl_val < value);
-    }
-
-    fn add_combined_register(&mut self, register: CombinedRegister) {
-        let register_value = self.registers.get16(register);
-
-        self.add_16(register_value);
-
-        self.program_counter += 1;
-    }
-
-    fn add_sp(&mut self) {
-        self.add_16(self.stack_pointer);
-
-        self.program_counter += 1;
-    }
-
-    fn sub(&mut self, value: u8) {
-        let a_val = self.registers.get(GeneralRegister::A);
-        let result = a_val.wrapping_sub(value);
-
-        self.registers.set(GeneralRegister::A, result);
-
-        self.registers.set_flag(FlagRegisterValue::N);
-
-        self.registers
-            .toggle_flag(FlagRegisterValue::C, value > a_val);
-
-        self.registers
-            .toggle_flag(FlagRegisterValue::H, sub_should_half_carry(a_val, value));
-
-        self.registers
-            .toggle_flag(FlagRegisterValue::Z, result == 0);
-    }
-
-    fn sub_register(&mut self, register: GeneralRegister) {
-        let value = self.registers.get(register);
-
-        self.sub(value);
-
-        self.program_counter += 1;
-    }
-
-    fn sub_hl(&mut self, mbc: &MBC) {
-        let value = mbc.read(usize::from(self.registers.get16(CombinedRegister::HL)));
-
-        self.sub(value);
-
-        self.program_counter += 1;
+        mbc.write(location, result);
     }
 
     fn sbc_register(&mut self, register: GeneralRegister) {
@@ -429,91 +531,32 @@ impl Cpu {
         self.program_counter += 1;
     }
 
-    fn read_with_offset(&self, location: CombinedRegister, offset: Option<MemoryOffset>) -> u16 {
-        let memory_loc = self.registers.get16(location);
-
-        match offset {
-            None => memory_loc,
-            Some(MemoryOffset::Plus) => memory_loc.wrapping_add(1),
-            Some(MemoryOffset::Minus) => memory_loc.wrapping_sub(1),
-        }
-    }
-
-    // specialized from rlc because the flags are set differently
-    fn rlca(&mut self) {
-        let value = self.registers.get(GeneralRegister::A);
-        let result = value.rotate_left(1);
-        self.registers.set(GeneralRegister::A, result);
+    fn sub(&mut self, value: u8) {
+        let a_val = self.registers.get(GeneralRegister::A);
+        let result = a_val.wrapping_sub(value);
 
         self.registers
-            .toggle_flag(FlagRegisterValue::C, value.is_bit_set(1 << 7));
-        self.registers.unset_flag(FlagRegisterValue::Z);
-        self.registers.unset_flag(FlagRegisterValue::H);
-        self.registers.unset_flag(FlagRegisterValue::N);
-
-        self.program_counter += 1;
-    }
-
-    fn rlc(&mut self, value: u8) -> u8 {
-        let result = value.rotate_left(1);
-
-        self.registers
-            .toggle_flag(FlagRegisterValue::C, value.is_bit_set(1 << 7));
-
-        self.registers
+            .set(GeneralRegister::A, result)
+            .set_flag(FlagRegisterValue::N)
+            .toggle_flag(FlagRegisterValue::C, a_val.sub_should_carry(value))
+            .toggle_flag(FlagRegisterValue::H, a_val.sub_should_half_carry(value))
             .toggle_flag(FlagRegisterValue::Z, result == 0);
-
-        self.registers.unset_flag(FlagRegisterValue::H);
-        self.registers.unset_flag(FlagRegisterValue::N);
-
-        result
     }
 
-    fn rrca(&mut self) {
-        let value = self.registers.get(GeneralRegister::A);
-        let result = value.rotate_right(1);
-        self.registers.set(GeneralRegister::A, result);
+    fn sub_register(&mut self, register: GeneralRegister) {
+        let value = self.registers.get(register);
 
-        self.registers
-            .toggle_flag(FlagRegisterValue::C, value.is_bit_set(1 << 0));
-        self.registers.unset_flag(FlagRegisterValue::Z);
-        self.registers.unset_flag(FlagRegisterValue::H);
-        self.registers.unset_flag(FlagRegisterValue::N);
+        self.sub(value);
 
         self.program_counter += 1;
     }
 
-    fn rlc_register(&mut self, register: GeneralRegister) {
-        let value = self.registers.get(register);
-        let result = self.rlc(value);
+    fn sub_hl(&mut self, mbc: &MBC) {
+        let value = mbc.read(usize::from(self.registers.get16(CombinedRegister::HL)));
 
-        self.registers.set(register, result);
-    }
+        self.sub(value);
 
-    fn rlc_memory(&mut self, mbc: &mut MBC) {
-        let location: usize = self.registers.get16(CombinedRegister::HL).into();
-        let value = mbc.read(location);
-        let result = self.rlc(value);
-
-        mbc.write(location, result);
-    }
-
-    fn bit(&mut self, bit: u8, value: u8) {
-        self.registers
-            .toggle_flag(FlagRegisterValue::Z, !value.is_bit_set(1 << bit));
-
-        self.registers.unset_flag(FlagRegisterValue::N);
-        self.registers.set_flag(FlagRegisterValue::H);
-    }
-
-    fn bit_register(&mut self, bit: u8, register: GeneralRegister) {
-        let value = self.registers.get(register);
-        self.bit(bit, value);
-    }
-
-    fn bit_memory(&mut self, mbc: &MBC, bit: u8) {
-        let value = mbc.read(self.registers.get16(CombinedRegister::HL).into());
-        self.bit(bit, value);
+        self.program_counter += 1;
     }
 
     fn res_register(&mut self, bit: u8, register: GeneralRegister) {
@@ -534,12 +577,11 @@ impl Cpu {
         let result = a_val ^ value;
 
         self.registers
-            .toggle_flag(FlagRegisterValue::Z, result == 0);
-        self.registers.unset_flag(FlagRegisterValue::C);
-        self.registers.unset_flag(FlagRegisterValue::H);
-        self.registers.unset_flag(FlagRegisterValue::N);
-
-        self.registers.set(GeneralRegister::A, result);
+            .set(GeneralRegister::A, result)
+            .toggle_flag(FlagRegisterValue::Z, result == 0)
+            .unset_flag(FlagRegisterValue::C)
+            .unset_flag(FlagRegisterValue::H)
+            .unset_flag(FlagRegisterValue::N);
     }
 
     fn xor_register(&mut self, register: GeneralRegister) {
@@ -717,6 +759,24 @@ impl Cpu {
 
     pub fn apply_operation(&mut self, mbc: &mut MBC) {
         self.current_op = mbc.read(self.program_counter.into());
+        self.count += 1;
+        // self.ops_used.insert(self.current_op);
+
+        // if self.count >= 12446 {
+        //     panic!("{:?}", self.ops_used.iter().map(|x| format!("{:#04x}", x)).collect::<Vec<String>>());
+        // }
+
+        println!(
+            "[{}] ({:#06x}) {:#04x} AF={:#06x} BC={:#06x} DE={:#06x} HL={:#06x} SP={:#06x}",
+            self.count,
+            self.program_counter,
+            self.current_op,
+            self.registers.get16(CombinedRegister::AF),
+            self.registers.get16(CombinedRegister::BC),
+            self.registers.get16(CombinedRegister::DE),
+            self.registers.get16(CombinedRegister::HL),
+            self.stack_pointer,
+        );
 
         match self.current_op {
             0x00 => self.nop(),
@@ -743,17 +803,17 @@ impl Cpu {
             0x14 => self.inc(GeneralRegister::D),
             0x15 => self.dec(GeneralRegister::D),
             0x16 => self.ld_next_8(mbc, GeneralRegister::D),
-            0x17 => self.not_implemented("RLA"),
-            0x18 => self.jr(mbc, None),
+            0x17 => self.rla(),
+            0x18 => self.jr_base(mbc),
             0x19 => self.add_combined_register(CombinedRegister::DE),
             0x1A => self.ld_r_rr(mbc, GeneralRegister::A, CombinedRegister::DE, None),
             0x1B => self.dec16(CombinedRegister::DE),
             0x1C => self.inc(GeneralRegister::E),
             0x1D => self.dec(GeneralRegister::E),
             0x1E => self.ld_next_8(mbc, GeneralRegister::E),
-            0x1F => self.not_implemented("RRA"),
+            0x1F => self.rra(),
 
-            0x20 => self.jr_not(mbc, Some(FlagRegisterValue::Z)),
+            0x20 => self.jrf_not(mbc, FlagRegisterValue::Z),
             0x21 => self.ld_next_16(mbc, CombinedRegister::HL),
             0x22 => self.ld_rr_r(
                 mbc,
@@ -766,7 +826,7 @@ impl Cpu {
             0x25 => self.dec(GeneralRegister::H),
             0x26 => self.not_implemented("LD H, d8"),
             0x27 => self.not_implemented("DAA"),
-            0x28 => self.jr(mbc, Some(FlagRegisterValue::Z)),
+            0x28 => self.jrf(mbc, FlagRegisterValue::Z),
             0x29 => self.add_combined_register(CombinedRegister::HL),
             0x2A => self.ld_r_rr(
                 mbc,
@@ -780,7 +840,7 @@ impl Cpu {
             0x2E => self.ld_next_8(mbc, GeneralRegister::L),
             0x2F => self.cpl(),
 
-            0x30 => self.jr_not(mbc, Some(FlagRegisterValue::C)),
+            0x30 => self.jrf_not(mbc, FlagRegisterValue::C),
             0x31 => self.ld_to_sp(mbc),
             0x32 => self.ld_rr_r(
                 mbc,
@@ -793,7 +853,7 @@ impl Cpu {
             0x35 => self.not_implemented("DEC (HL) 1"),
             0x36 => self.not_implemented("LD (HL), u8"),
             0x37 => self.not_implemented("SCF"),
-            0x38 => self.jr(mbc, Some(FlagRegisterValue::C)),
+            0x38 => self.jrf(mbc, FlagRegisterValue::C),
             0x39 => self.add_sp(),
             0x3A => self.ld_r_rr(
                 mbc,
@@ -875,14 +935,14 @@ impl Cpu {
             0x7E => self.ld_r_rr(mbc, GeneralRegister::A, CombinedRegister::HL, None),
             0x7F => self.ld(GeneralRegister::A, GeneralRegister::A),
 
-            0x80 => self.add_register(GeneralRegister::B),
-            0x81 => self.add_register(GeneralRegister::C),
-            0x82 => self.add_register(GeneralRegister::D),
-            0x83 => self.add_register(GeneralRegister::E),
-            0x84 => self.add_register(GeneralRegister::H),
-            0x85 => self.add_register(GeneralRegister::L),
-            0x86 => self.add_memory(mbc),
-            0x87 => self.add_register(GeneralRegister::A),
+            0x80 => self.add_a_r(GeneralRegister::B),
+            0x81 => self.add_a_r(GeneralRegister::C),
+            0x82 => self.add_a_r(GeneralRegister::D),
+            0x83 => self.add_a_r(GeneralRegister::E),
+            0x84 => self.add_a_r(GeneralRegister::H),
+            0x85 => self.add_a_r(GeneralRegister::L),
+            0x86 => self.add_a_hl_loc(mbc),
+            0x87 => self.add_a_r(GeneralRegister::A),
             0x88 => self.not_implemented("ADC A, B"),
             0x89 => self.not_implemented("ADC A, C"),
             0x8A => self.not_implemented("ADC A, D"),
@@ -994,7 +1054,7 @@ impl Cpu {
             0xEE => self.not_implemented("XOR A, u8"),
             0xEF => self.not_implemented("RST 28h"),
 
-            0xF0 => self.not_implemented("LD A, (FF00+u8)"),
+            0xF0 => self.ld_relative_memory_to_a(mbc),
             0xF1 => self.not_implemented("POP AF"),
             0xF2 => self.not_implemented("LD A, (FF00+C)"),
             0xF3 => self.di(),
