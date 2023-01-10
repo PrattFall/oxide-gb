@@ -59,11 +59,11 @@ impl From<Cartridge> for MBC {
                     .map(|x| x.to_vec())
                     .collect(),
             },
-            video_ram: vec![0x0000; 0x9fff - 0x8000],
-            work_ram: vec![0x0000; 0xdfff - 0xc000],
-            sprite_attribute_table: vec![0x0000; 0xfe9f - 0xfe00],
-            io_registers: vec![0x0000; 0xff7f - 0xff00],
-            high_ram: vec![0x0000; 0xfffe - 0xff80],
+            video_ram: vec![0x0000; 0xa000 - 0x8000],
+            work_ram: vec![0x0000; 0xe000 - 0xc000],
+            sprite_attribute_table: vec![0x0000; 0xfea0 - 0xfe00],
+            io_registers: vec![0x0000; 0xff80 - 0xff00],
+            high_ram: vec![0x0000; 0xffff - 0xff80],
             interrupt_enable_register: 0x0000,
         }
     }
@@ -79,6 +79,10 @@ impl MBC {
     }
 
     pub fn write(&mut self, location: usize, value: u8) {
+        println!(
+            "Writing value ({:#06x}) to location ({:#06x})",
+            value, location
+        );
         match location {
             // Ram is enabled when the lowest 4 bits written to this range
             // are equal to 0x00a0
@@ -99,7 +103,7 @@ impl MBC {
 
             0x8000..=0x9fff => self.video_ram[location - 0x8000] = value,
             0xa000..=0xbfff => self.ram.set_at(location - 0xa000, value),
-            0xc000..=0xdfff => self.work_ram[location - 0xc001] = value,
+            0xc000..=0xdfff => self.work_ram[location - 0xc000] = value,
             0xfe00..=0xfe9f => self.sprite_attribute_table[location - 0xfe00] = value,
             0xff00..=0xff7f => self.io_registers[location - 0xff00] = value,
             0xff80..=0xfffe => self.high_ram[location - 0xff80] = value,

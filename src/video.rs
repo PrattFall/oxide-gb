@@ -11,8 +11,9 @@ pub const LIGHTEST_GREEN: Pixel = (155, 188, 15, 0);
 
 const TILE_SIZE_BYTES: u8 = 16;
 
-type Tile = [[Pixel; 8]; 8];
-type TileDictionary = [Tile; 256];
+type PixelRow = Vec<Pixel>;
+type Tile = Vec<PixelRow>;
+type TileDictionary = Vec<Tile>;
 
 pub struct Video {
     pub lcdc: LCDC,
@@ -23,7 +24,7 @@ impl Video {
     pub fn new() -> Self {
         Video {
             lcdc: LCDC::default(),
-            tiles: [[[LIGHTEST_GREEN; 8]; 8]; 256]
+            tiles: vec![vec![vec![LIGHTEST_GREEN; 8]; 8]; 256],
         }
     }
 
@@ -31,9 +32,9 @@ impl Video {
         (vec![], vec![])
     }
 
-    pub fn collect_tiles(&self, ram: &MBC) {
+    pub fn collect_tiles(&mut self, ram: &MBC) {
         for i in 0..256 {
-            self.tiles[i] = self.get_tile(&ram, i as u8)
+            self.tiles[i] = self.get_tile(&ram, i as u8);
         }
     }
 
@@ -47,7 +48,7 @@ impl Video {
                     (false, false) => DARKEST_GREEN,
                 },
             )
-            .collect()
+            .collect::<Vec<Pixel>>()
     }
 
     // TODO: Actually handle i8 when lcdc.4 is active
@@ -64,6 +65,24 @@ impl Video {
                     panic!("Uneven bytes found when accessing tile")
                 }
             })
-            .collect()
+            .collect::<Tile>()
+    }
+
+    fn compose_tiles(&self, tiles: Vec<Tile>) -> Vec<Vec<Pixel>> {
+        let mut result = vec![vec![DARKEST_GREEN; 32]; 32];
+        let mut i: usize = 0;
+
+        for tile_row in 0..32 {
+            for tile_col in 0..32 {
+                for row in 0..8 {
+                    for col in 0..8 {
+                        result[tile_row * 8 + row][tile_col * 8 + col] = tiles[i][row][col];
+                        i += 1;
+                    }
+                }
+            }
+        }
+
+        result
     }
 }

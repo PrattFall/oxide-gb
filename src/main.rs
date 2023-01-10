@@ -8,11 +8,11 @@ mod cpu;
 mod cpu_registers;
 mod flag_register;
 mod mbc;
-// mod render;
-// mod lcdc;
+mod render;
+mod lcdc;
 mod tile;
 mod utils;
-// mod video;
+mod video;
 
 use std::fs::File;
 use std::io;
@@ -22,8 +22,8 @@ use std::thread;
 use crate::cartridge::Cartridge;
 use crate::cpu::Cpu;
 use crate::mbc::MBC;
-// use crate::render::render;
-// use crate::video::Video;
+use crate::render::render;
+use crate::video::Video;
 
 
 fn main() -> io::Result<()> {
@@ -34,13 +34,13 @@ fn main() -> io::Result<()> {
     let cartridge = Cartridge::from(f);
     let mut memory = MBC::from(cartridge);
     let mut cpu = Cpu::default();
-    // let mut input = String::new();
-    // let v = Video::new();
+    let mut input = String::new();
+    let v = Video::new();
 
     // Skip over the Boot Rom
     cpu.program_counter = 0x100;
 
-    // render();
+    render();
 
     loop {
         let start = Instant::now();
@@ -53,11 +53,11 @@ fn main() -> io::Result<()> {
             println!("{:?} > {:?}", elapsed, cpu_wait);
         }
 
-        // std::io::stdin().read_line(&mut input).unwrap();
-        //
-        // if input.trim() == "q" {
-        //     break;
-        // }
+        std::io::stdin().read_line(&mut input).unwrap();
+
+        if input.trim() == "q" {
+            break;
+        }
     }
 
     Ok(())

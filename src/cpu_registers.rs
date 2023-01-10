@@ -130,17 +130,17 @@ impl Registers {
         self.get(GeneralRegister::F).is_bit_set(flag as u8)
     }
 
-    // pub fn display(&self) -> String {
-    //     ALL_REGISTERS
-    //         .map(|r| format!("{:?} {:#04x}", r, self.get(r)))
-    //         .join(", ")
-    // }
+    pub fn increment16(&mut self, register: CombinedRegister) -> u16 {
+        let result = self.get16(register).wrapping_add(1);
+        self.set16(register, result);
+        result
+    }
 
-    // pub fn display_combined(&self) -> String {
-    //     ALL_COMBINED_REGISTERS
-    //         .map(|r| format!("{:?} {:04x}", r, self.get16(r)))
-    //         .join(", ")
-    // }
+    pub fn decrement16(&mut self, register: CombinedRegister) -> u16 {
+        let result = self.get16(register).wrapping_sub(1);
+        self.set16(register, result);
+        result
+    }
 }
 
 impl Default for Registers {

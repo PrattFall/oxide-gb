@@ -4,7 +4,7 @@ use glium::index::PrimitiveType;
 #[allow(unused_imports)]
 use glium::{glutin, Surface};
 
-use crate::video::LIGHTEST_GREEN;
+use crate::video::{LIGHTEST_GREEN, DARKEST_GREEN};
 
 #[derive(Copy, Clone)]
 struct Vertex {
@@ -90,7 +90,7 @@ pub fn render() {
     )
     .unwrap();
 
-    let row = vec![LIGHTEST_GREEN; 160];
+    let row = vec![DARKEST_GREEN; 160];
     let blank_pixels = vec![row; 144];
 
     let pixel_buffer = glium::texture::pixel_buffer::PixelBuffer::new_empty(&display, 160 * 144);
