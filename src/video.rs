@@ -3,17 +3,20 @@ use crate::mbc::MBC;
 use crate::utils::BitWise;
 
 pub type Pixel = (u8, u8, u8, u8);
+type PixelRow = Vec<Pixel>;
+pub type Tile = Vec<PixelRow>;
+pub type TileDictionary = Vec<Tile>;
+pub type Frame = Vec<Vec<Pixel>>;
 
 pub const DARKEST_GREEN: Pixel = (15, 56, 15, 0);
 pub const DARK_GREEN: Pixel = (48, 98, 48, 0);
 pub const LIGHT_GREEN: Pixel = (139, 172, 15, 0);
 pub const LIGHTEST_GREEN: Pixel = (155, 188, 15, 0);
 
-const TILE_SIZE_BYTES: u8 = 16;
+pub const SCREEN_HEIGHT: u8 = 144;
+pub const SCREEN_WIDTH: u8 = 160;
 
-type PixelRow = Vec<Pixel>;
-type Tile = Vec<PixelRow>;
-type TileDictionary = Vec<Tile>;
+const TILE_SIZE_BYTES: u8 = 16;
 
 pub struct Video {
     pub lcdc: LCDC,
@@ -26,6 +29,11 @@ impl Video {
             lcdc: LCDC::default(),
             tiles: vec![vec![vec![LIGHTEST_GREEN; 8]; 8]; 256],
         }
+    }
+
+    pub fn blank_frame() -> Frame {
+        let row = vec![DARKEST_GREEN; SCREEN_WIDTH.into()];
+        vec![row; SCREEN_HEIGHT.into()]
     }
 
     fn build_tile_map(ram: MBC, tile_index: u8) -> (Vec<Tile>, Vec<Tile>) {

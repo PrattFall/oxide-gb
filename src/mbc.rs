@@ -79,10 +79,10 @@ impl MBC {
     }
 
     pub fn write(&mut self, location: usize, value: u8) {
-        println!(
-            "Writing value ({:#06x}) to location ({:#06x})",
-            value, location
-        );
+        // println!(
+        //     "Writing value ({:#06x}) to location ({:#06x})",
+        //     value, location
+        // );
         match location {
             // Ram is enabled when the lowest 4 bits written to this range
             // are equal to 0x00a0

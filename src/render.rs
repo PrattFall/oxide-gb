@@ -1,10 +1,25 @@
-use std::time::{Duration, Instant};
+use std::{
+    fs::File,
+    time::{Duration, Instant},
+};
 
-use glium::index::PrimitiveType;
 #[allow(unused_imports)]
 use glium::{glutin, Surface};
+use glium::{
+    index::PrimitiveType,
+    pixel_buffer::PixelBuffer,
+    uniforms::{EmptyUniforms, Sampler, UniformsStorage},
+    Program,
+};
+use winit::window::WindowBuilder;
 
-use crate::video::{LIGHTEST_GREEN, DARKEST_GREEN};
+use crate::{
+    cartridge::Cartridge,
+    cpu::{Cpu, CLOCK_MHZ},
+    video::{Pixel, Frame, Video, SCREEN_WIDTH, SCREEN_HEIGHT},
+    mbc::MBC,
+    video::DARKEST_GREEN,
+};
 
 #[derive(Copy, Clone)]
 struct Vertex {
@@ -12,32 +27,12 @@ struct Vertex {
     tex_coords: [f32; 2],
 }
 
-fn build_vertex_buffer(display: &glium::Display) -> glium::VertexBuffer<Vertex> {
-    implement_vertex!(Vertex, position, tex_coords);
+type Uniforms<'a> = UniformsStorage<
+    'a,
+    Sampler<'a, glium::texture::Texture2d>,
+    UniformsStorage<'a, [[f32; 4]; 4], EmptyUniforms>,
+>;
 
-    glium::VertexBuffer::new(
-        display,
-        &[
-            Vertex {
-                position: [-1.0, -1.0],
-                tex_coords: [0.0, 0.0],
-            },
-            Vertex {
-                position: [-1.0, 1.0],
-                tex_coords: [0.0, 1.0],
-            },
-            Vertex {
-                position: [1.0, 1.0],
-                tex_coords: [1.0, 1.0],
-            },
-            Vertex {
-                position: [1.0, -1.0],
-                tex_coords: [1.0, 0.0],
-            },
-        ],
-    )
-    .unwrap()
-}
 
 const VERTEX_SHADER_140: &'static str = "
 #version 140
@@ -68,56 +63,120 @@ void main() {
 }
 ";
 
-pub fn render() {
-    let event_loop = glutin::event_loop::EventLoop::new();
-    let wb = glutin::window::WindowBuilder::new()
-        .with_inner_size(glium::glutin::dpi::LogicalSize::new(160, 144i16));
+fn build_vertex_buffer(display: &glium::Display) -> glium::VertexBuffer<Vertex> {
+    implement_vertex!(Vertex, position, tex_coords);
+
+    glium::VertexBuffer::new(
+        display,
+        &[
+            Vertex {
+                position: [-1.0, -1.0],
+                tex_coords: [0.0, 0.0],
+            },
+            Vertex {
+                position: [-1.0, 1.0],
+                tex_coords: [0.0, 1.0],
+            },
+            Vertex {
+                position: [1.0, 1.0],
+                tex_coords: [1.0, 1.0],
+            },
+            Vertex {
+                position: [1.0, -1.0],
+                tex_coords: [1.0, 0.0],
+            },
+        ],
+    )
+    .unwrap()
+}
+
+fn build_index_buffer(display: &glium::Display) -> glium::IndexBuffer<u16> {
+    glium::IndexBuffer::new(display, PrimitiveType::TriangleStrip, &[1 as u16, 2, 0, 3]).unwrap()
+}
+
+fn build_window_builder() -> WindowBuilder {
+    glutin::window::WindowBuilder::new().with_inner_size(
+        glium::glutin::dpi::LogicalSize::<i16>::new(SCREEN_WIDTH.into(), SCREEN_HEIGHT.into()),
+    )
+}
+
+fn build_pixel_buffer(display: &glium::Display) -> PixelBuffer<Pixel> {
+    glium::texture::pixel_buffer::PixelBuffer::<Pixel>::new_empty(
+        display,
+        Into::<usize>::into(SCREEN_WIDTH) * Into::<usize>::into(SCREEN_HEIGHT),
+    )
+}
+
+fn get_uniforms<'a>(screen_texture: &'a glium::texture::Texture2d) -> Uniforms<'a> {
+    uniform! {
+        matrix: [
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0f32]
+        ],
+        tex: screen_texture.sampled().magnify_filter(glium::uniforms::MagnifySamplerFilter::Nearest)
+    }
+}
+
+fn build_display(event_loop: &glutin::event_loop::EventLoop<()>) -> glium::Display {
+    let wb = build_window_builder();
     let cb = glutin::ContextBuilder::new();
-    let display = glium::Display::new(wb, cb, &event_loop).unwrap();
+    glium::Display::new(wb, cb, &event_loop).unwrap()
+}
 
-    let vertex_buffer = build_vertex_buffer(&display);
-
-    let index_buffer =
-        glium::IndexBuffer::new(&display, PrimitiveType::TriangleStrip, &[1 as u16, 2, 0, 3])
-            .unwrap();
-
-    let program = program!(
-        &display,
+fn build_program(display: &glium::Display) -> Program {
+    program!(
+        display,
         140 => {
             vertex: VERTEX_SHADER_140,
             fragment: FRAGMENT_SHADER_140
         }
     )
-    .unwrap();
+    .unwrap()
+}
 
-    let row = vec![DARKEST_GREEN; 160];
-    let blank_pixels = vec![row; 144];
+fn init_texture(display: &glium::Display) -> glium::texture::Texture2d {
+    glium::texture::texture2d::Texture2d::new(display, Video::blank_frame()).unwrap()
+}
 
-    let pixel_buffer = glium::texture::pixel_buffer::PixelBuffer::new_empty(&display, 160 * 144);
-    let screen_texture =
-        glium::texture::texture2d::Texture2d::new(&display, blank_pixels.clone()).unwrap();
+pub fn render<'a>(input_file: File) {
+    let event_loop = glutin::event_loop::EventLoop::new();
+    let display = build_display(&event_loop);
+    let vertex_buffer = build_vertex_buffer(&display);
+    let index_buffer = build_index_buffer(&display);
+    let pixel_buffer = build_pixel_buffer(&display);
+    let program = build_program(&display);
+    let screen_texture = init_texture(&display);
+
+    let cartridge = Cartridge::from(input_file);
+    let mut memory = MBC::from(cartridge);
+    let mut cpu = Cpu::default();
+
+    // Skip over the Boot Rom
+    cpu.program_counter = 0x100;
 
     event_loop.run(move |event, _, control_flow| {
-        let pixels = blank_pixels.clone().concat();
+        cpu.apply_operation(&mut memory);
+
+        // Draw
+        let pixels = Video::blank_frame().concat();
 
         pixel_buffer.write(&pixels);
 
-        screen_texture
-            .main_level()
-            .raw_upload_from_pixel_buffer(pixel_buffer.as_slice(), 0 .. 160, 0 .. 144, 0 .. 1);
+        screen_texture.main_level().raw_upload_from_pixel_buffer(
+            pixel_buffer.as_slice(),
+            0..SCREEN_WIDTH.into(),
+            0..SCREEN_HEIGHT.into(),
+            0..1,
+        );
 
-        let uniforms = uniform! {
-            matrix: [
-                [1.0, 0.0, 0.0, 0.0],
-                [0.0, 1.0, 0.0, 0.0],
-                [0.0, 0.0, 1.0, 0.0],
-                [0.0, 0.0, 0.0, 1.0f32]
-            ],
-            tex: screen_texture.sampled().magnify_filter(glium::uniforms::MagnifySamplerFilter::Nearest)
-        };
+        let uniforms = get_uniforms(&screen_texture);
 
         let mut target = display.draw();
+
         target.clear_color(0.0, 0.0, 0.0, 0.0);
+
         target
             .draw(
                 &vertex_buffer,
@@ -127,6 +186,7 @@ pub fn render() {
                 &Default::default(),
             )
             .unwrap();
+
         target.finish().unwrap();
 
         match event {
@@ -145,7 +205,7 @@ pub fn render() {
             _ => return,
         }
 
-        let next_frame_time = Instant::now() + Duration::from_nanos(16666667);
+        let next_frame_time = Instant::now() + Duration::from_nanos(CLOCK_MHZ.into());
         *control_flow = glutin::event_loop::ControlFlow::WaitUntil(next_frame_time);
     });
 }
