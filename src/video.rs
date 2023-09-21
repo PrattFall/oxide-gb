@@ -3,7 +3,7 @@ use crate::mbc::MBC;
 use crate::utils::BitWise;
 
 pub type Pixel = (u8, u8, u8, u8);
-type PixelRow = Vec<Pixel>;
+pub type PixelRow = Vec<Pixel>;
 pub type Tile = Vec<PixelRow>;
 pub type TileDictionary = Vec<Tile>;
 pub type Frame = Vec<Vec<Pixel>>;
@@ -46,17 +46,15 @@ impl Video {
         }
     }
 
-    fn tile_row(b1: u8, b2: u8) -> Vec<Pixel> {
+    fn tile_row(b1: u8, b2: u8) -> PixelRow {
         (0..8u8)
-            .map(
-                |i| match (b2.is_bit_set(i), b1.is_bit_set(i)) {
-                    (true, true) => LIGHTEST_GREEN,
-                    (true, false) => LIGHT_GREEN,
-                    (false, true) => DARK_GREEN,
-                    (false, false) => DARKEST_GREEN,
-                },
-            )
-            .collect::<Vec<Pixel>>()
+            .map(|i| match (b2.is_bit_set(i), b1.is_bit_set(i)) {
+                (true, true) => LIGHTEST_GREEN,
+                (true, false) => LIGHT_GREEN,
+                (false, true) => DARK_GREEN,
+                (false, false) => DARKEST_GREEN,
+            })
+            .collect::<PixelRow>()
     }
 
     // TODO: Actually handle i8 when lcdc.4 is active
@@ -76,7 +74,7 @@ impl Video {
             .collect::<Tile>()
     }
 
-    fn compose_tiles(&self, tiles: Vec<Tile>) -> Vec<Vec<Pixel>> {
+    fn compose_tiles(&self, tiles: Vec<Tile>) -> Frame {
         let mut result = vec![vec![DARKEST_GREEN; 32]; 32];
         let mut i: usize = 0;
 
@@ -92,5 +90,28 @@ impl Video {
         }
 
         result
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::video::{Video, DARKEST_GREEN, DARK_GREEN, LIGHTEST_GREEN, LIGHT_GREEN};
+
+    #[test]
+    fn tile_row() {
+        let expected = vec![
+            DARKEST_GREEN,
+            LIGHT_GREEN,
+            LIGHTEST_GREEN,
+            LIGHTEST_GREEN,
+            LIGHTEST_GREEN,
+            LIGHTEST_GREEN,
+            LIGHT_GREEN,
+            DARKEST_GREEN,
+        ];
+
+        assert!(Video::tile_row(0x3c, 0x7e)
+            .iter()
+            .all(|item| expected.contains(item)));
     }
 }

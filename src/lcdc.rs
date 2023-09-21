@@ -95,7 +95,9 @@ mod tests {
 
     #[test]
     fn bg_and_window_tile_data_area() {
-        assert!(LCDC::BG_AND_WINDOW_TILE_DATA_AREA.bg_and_window_tile_data_area() == (0x8800..=0x97ff));
+        assert!(
+            LCDC::BG_AND_WINDOW_TILE_DATA_AREA.bg_and_window_tile_data_area() == (0x8800..=0x97ff)
+        );
         assert!(LCDC::OBJ_SIZE.bg_and_window_tile_data_area() == (0x8000..=0x8fff));
     }
 
