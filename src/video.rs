@@ -1,38 +1,54 @@
 use crate::lcdc::LCDC;
 use crate::mbc::MBC;
-use crate::utils::BitWise;
+use crate::pixel::Pixel;
+use crate::tile::{tile_from_ram, Tile};
 
-pub type Pixel = (u8, u8, u8, u8);
-pub type PixelRow = Vec<Pixel>;
-pub type Tile = Vec<PixelRow>;
-pub type TileDictionary = Vec<Tile>;
 pub type Frame = Vec<Vec<Pixel>>;
-
-pub const DARKEST_GREEN: Pixel = (15, 56, 15, 0);
-pub const DARK_GREEN: Pixel = (48, 98, 48, 0);
-pub const LIGHT_GREEN: Pixel = (139, 172, 15, 0);
-pub const LIGHTEST_GREEN: Pixel = (155, 188, 15, 0);
 
 pub const SCREEN_HEIGHT: u8 = 144;
 pub const SCREEN_WIDTH: u8 = 160;
+pub const BACKGROUND_SIZE: usize = 256;
 
-const TILE_SIZE_BYTES: u8 = 16;
+pub struct VideoBackground {
+    pixels: [[Pixel; BACKGROUND_SIZE]; BACKGROUND_SIZE],
+}
 
+impl Default for VideoBackground {
+    fn default() -> Self {
+        VideoBackground {
+            pixels: [[Pixel::Lightest; BACKGROUND_SIZE]; BACKGROUND_SIZE],
+        }
+    }
+}
+
+pub struct TileDictionary {
+    tiles: [Tile; 256]
+}
+
+impl Default for TileDictionary {
+    fn default() -> Self {
+        let tile: Tile = Tile::default();
+
+        TileDictionary {
+            tiles: [tile; 256]
+        }
+    }
+}
+
+impl TileDictionary {
+    fn set(&mut self, index: usize, value: Tile) {
+        self.tiles[index] = value;
+    }
+}
+
+#[derive(Default)]
 pub struct Video {
-    pub lcdc: LCDC,
     tiles: TileDictionary,
 }
 
 impl Video {
-    pub fn new() -> Self {
-        Video {
-            lcdc: LCDC::default(),
-            tiles: vec![vec![vec![LIGHTEST_GREEN; 8]; 8]; 256],
-        }
-    }
-
     pub fn blank_frame() -> Frame {
-        let row = vec![DARKEST_GREEN; SCREEN_WIDTH.into()];
+        let row = vec![Pixel::Lightest; SCREEN_WIDTH.into()];
         vec![row; SCREEN_HEIGHT.into()]
     }
 
@@ -40,49 +56,21 @@ impl Video {
         (vec![], vec![])
     }
 
-    pub fn collect_tiles(&mut self, ram: &MBC) {
+    pub fn collect_tiles(&mut self, lcdc: LCDC, ram: &MBC) {
         for i in 0..256 {
-            self.tiles[i] = self.get_tile(&ram, i as u8);
+            self.tiles.set(i, tile_from_ram(lcdc, &ram, i));
         }
     }
 
-    fn tile_row(b1: u8, b2: u8) -> PixelRow {
-        (0..8u8)
-            .map(|i| match (b2.is_bit_set(i), b1.is_bit_set(i)) {
-                (true, true) => LIGHTEST_GREEN,
-                (true, false) => LIGHT_GREEN,
-                (false, true) => DARK_GREEN,
-                (false, false) => DARKEST_GREEN,
-            })
-            .collect::<PixelRow>()
-    }
-
-    // TODO: Actually handle i8 when lcdc.4 is active
-    fn get_tile(&self, ram: &MBC, tile_index: u8) -> Tile {
-        let prefix = *self.lcdc.bg_and_window_tile_data_area().start() as usize;
-        let vram_start = prefix + (tile_index * TILE_SIZE_BYTES) as usize;
-        let vram_offset = vram_start + TILE_SIZE_BYTES as usize;
-
-        ram.read_slice(vram_start, vram_offset)
-            .chunks(2)
-            .map(|chunk| match chunk {
-                [b1, b2] => Video::tile_row(*b1, *b2),
-                _ => {
-                    panic!("Uneven bytes found when accessing tile")
-                }
-            })
-            .collect::<Tile>()
-    }
-
     fn compose_tiles(&self, tiles: Vec<Tile>) -> Frame {
-        let mut result = vec![vec![DARKEST_GREEN; 32]; 32];
+        let mut result = Video::blank_frame();
         let mut i: usize = 0;
 
         for tile_row in 0..32 {
             for tile_col in 0..32 {
                 for row in 0..8 {
                     for col in 0..8 {
-                        result[tile_row * 8 + row][tile_col * 8 + col] = tiles[i][row][col];
+                        result[tile_row * 8 + row][tile_col * 8 + col] = tiles[i][&row][&col];
                         i += 1;
                     }
                 }
@@ -90,28 +78,5 @@ impl Video {
         }
 
         result
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::video::{Video, DARKEST_GREEN, DARK_GREEN, LIGHTEST_GREEN, LIGHT_GREEN};
-
-    #[test]
-    fn tile_row() {
-        let expected = vec![
-            DARKEST_GREEN,
-            LIGHT_GREEN,
-            LIGHTEST_GREEN,
-            LIGHTEST_GREEN,
-            LIGHTEST_GREEN,
-            LIGHTEST_GREEN,
-            LIGHT_GREEN,
-            DARKEST_GREEN,
-        ];
-
-        assert!(Video::tile_row(0x3c, 0x7e)
-            .iter()
-            .all(|item| expected.contains(item)));
     }
 }

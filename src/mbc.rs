@@ -10,6 +10,13 @@ pub struct BankedMemory {
 }
 
 impl BankedMemory {
+    pub fn new(active_bank: usize, bank_size: usize, bank_count: usize) -> Self {
+        BankedMemory {
+            active_bank,
+            banks: vec![vec![0; bank_size]; bank_count],
+        }
+    }
+
     pub fn value_at(&self, location: usize) -> u8 {
         self.banks[self.active_bank][location]
     }
@@ -42,14 +49,8 @@ impl From<Cartridge> for MBC {
             banking_mode: 0,
             ram_enabled: false,
             ram: match cartridge.header.ram_size {
-                Some(ram_size) => BankedMemory {
-                    active_bank: 0,
-                    banks: vec![vec![0; RAM_BANK_SIZE]; ram_size.into()],
-                },
-                None => BankedMemory {
-                    active_bank: 0,
-                    banks: vec![vec![0; 0x8000]; 1],
-                },
+                Some(ram_size) => BankedMemory::new(0, RAM_BANK_SIZE, ram_size.into()),
+                None => BankedMemory::new(0, 0x8000, 1),
             },
             rom: BankedMemory {
                 active_bank: 1,
@@ -93,8 +94,7 @@ impl MBC {
             0x2000..=0x3fff => self.rom.active_bank = usize::from(value & 0b0001_1111),
 
             // Ram bank is set to the lowest 2 bits
-            // TODO: Write code for "large" MBC1M carts which handle this
-            // differently
+            // TODO: Write code for "large" MBC1M carts which handle this differently
             0x4000..=0x5fff => self.ram.active_bank = usize::from(value & 0b0000_0011),
 
             // Banking Mode is set to the lowest 2 bits
@@ -124,7 +124,7 @@ impl MBC {
             0xc000..=0xdfff => self.work_ram[location - 0xc000],
             0xe000..=0xfdff => self.work_ram[location - 0xe000],
             0xfe00..=0xfe9f => self.sprite_attribute_table[location - 0xfe00],
-            0xfea0..=0xfeff => panic!("Ram Banks between 0xfea0 and 0xfeff are unusable"),
+            0xfea0..=0xfeff => panic!("Ram Banks between 0xfea0 and 0xfeff are prohibited"),
             0xff00..=0xff7f => self.io_registers[location - 0xff00],
             0xff80..=0xfffe => self.high_ram[location - 0xff80],
             0xffff => self.interrupt_enable_register,

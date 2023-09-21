@@ -123,6 +123,30 @@ mod tests {
     }
 
     #[test]
+    fn bitwise_is_bit_set_3c() {
+        assert!(!(0x3c as u8).is_bit_set(1 << 0));
+        assert!(!(0x3c as u8).is_bit_set(1 << 1));
+        assert!((0x3c as u8).is_bit_set(1 << 2));
+        assert!((0x3c as u8).is_bit_set(1 << 3));
+        assert!((0x3c as u8).is_bit_set(1 << 4));
+        assert!((0x3c as u8).is_bit_set(1 << 5));
+        assert!(!(0x3c as u8).is_bit_set(1 << 6));
+        assert!(!(0x3c as u8).is_bit_set(1 << 7));
+    }
+
+    #[test]
+    fn bitwise_is_bit_set_7e() {
+        assert!(!(0x7e as u8).is_bit_set(1 << 0));
+        assert!((0x7e as u8).is_bit_set(1 << 1));
+        assert!((0x7e as u8).is_bit_set(1 << 2));
+        assert!((0x7e as u8).is_bit_set(1 << 3));
+        assert!((0x7e as u8).is_bit_set(1 << 4));
+        assert!((0x7e as u8).is_bit_set(1 << 5));
+        assert!((0x7e as u8).is_bit_set(1 << 6));
+        assert!(!(0x7e as u8).is_bit_set(1 << 7));
+    }
+
+    #[test]
     fn bitwise_is_bit_set_excludes_unset_bits() {
         assert!(!2.is_bit_set(1 << 0));
     }

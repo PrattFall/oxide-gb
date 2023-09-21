@@ -16,10 +16,17 @@ use winit::window::WindowBuilder;
 use crate::{
     cartridge::Cartridge,
     cpu::{Cpu, CLOCK_MHZ},
-    video::{Pixel, Frame, Video, SCREEN_WIDTH, SCREEN_HEIGHT},
     mbc::MBC,
-    video::DARKEST_GREEN,
+    pixel::Pixel,
+    video::{Video, Frame, SCREEN_HEIGHT, SCREEN_WIDTH},
 };
+
+type PixelColor = (u8, u8, u8, u8);
+
+const DARKEST_GREEN: PixelColor = (15, 56, 15, 0);
+const DARK_GREEN: PixelColor = (48, 98, 48, 0);
+const LIGHT_GREEN: PixelColor = (139, 172, 15, 0);
+const LIGHTEST_GREEN: PixelColor = (155, 188, 15, 0);
 
 #[derive(Copy, Clone)]
 struct Vertex {
@@ -32,7 +39,6 @@ type Uniforms<'a> = UniformsStorage<
     Sampler<'a, glium::texture::Texture2d>,
     UniformsStorage<'a, [[f32; 4]; 4], EmptyUniforms>,
 >;
-
 
 const VERTEX_SHADER_140: &'static str = "
 #version 140
@@ -100,8 +106,8 @@ fn build_window_builder() -> WindowBuilder {
     )
 }
 
-fn build_pixel_buffer(display: &glium::Display) -> PixelBuffer<Pixel> {
-    glium::texture::pixel_buffer::PixelBuffer::<Pixel>::new_empty(
+fn build_pixel_buffer(display: &glium::Display) -> PixelBuffer<PixelColor> {
+    glium::texture::pixel_buffer::PixelBuffer::<PixelColor>::new_empty(
         display,
         Into::<usize>::into(SCREEN_WIDTH) * Into::<usize>::into(SCREEN_HEIGHT),
     )
@@ -136,8 +142,27 @@ fn build_program(display: &glium::Display) -> Program {
     .unwrap()
 }
 
+type FrameColors = Vec<Vec<PixelColor>>;
+
+fn frame_to_colors(frame: Frame) -> FrameColors {
+    fn frame_row_to_colors(row: &Vec<Pixel>) -> Vec<PixelColor> {
+        row.iter().map(pixel_to_color).collect()
+    }
+
+    frame.iter().map(frame_row_to_colors).collect()
+}
+
 fn init_texture(display: &glium::Display) -> glium::texture::Texture2d {
-    glium::texture::texture2d::Texture2d::new(display, Video::blank_frame()).unwrap()
+    glium::texture::texture2d::Texture2d::new(display, frame_to_colors(Video::blank_frame())).unwrap()
+}
+
+fn pixel_to_color(pixel: &Pixel) -> PixelColor {
+    match pixel {
+        Pixel::Lightest => LIGHTEST_GREEN,
+        Pixel::Light => LIGHT_GREEN,
+        Pixel::Dark => DARK_GREEN,
+        Pixel::Darkest => DARKEST_GREEN,
+    }
 }
 
 pub fn render<'a>(input_file: File) {
@@ -160,7 +185,11 @@ pub fn render<'a>(input_file: File) {
         cpu.apply_operation(&mut memory);
 
         // Draw
-        let pixels = Video::blank_frame().concat();
+        let pixels = Video::blank_frame()
+            .concat()
+            .iter()
+            .map(pixel_to_color)
+            .collect::<Vec<PixelColor>>();
 
         pixel_buffer.write(&pixels);
 

@@ -620,7 +620,8 @@ impl Cpu {
         self.registers.is_flag_set(FlagRegisterValue::C) as u8
     }
 
-    /// Represents an unused CPU instruction. Not to be confused with NOP
+    /// Represents an unused CPU instruction. If this instruction is called
+    /// there is most likely a bug in the emulator or the rom.
     fn nothing(&mut self) {
         panic!("Invalid CPU Instruction");
     }

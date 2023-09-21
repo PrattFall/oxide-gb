@@ -10,6 +10,7 @@ mod flag_register;
 mod lcdc;
 mod mbc;
 mod ops;
+mod pixel;
 mod prefix_ops;
 mod render;
 mod tile;
@@ -39,7 +40,7 @@ fn read_cartridge() -> impl AsRef<Path> {
 }
 
 fn main() -> io::Result<()> {
-    let _v = Video::new();
+    let _v = Video::default();
 
     render(File::open(read_cartridge()).unwrap());
 
