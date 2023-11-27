@@ -1,7 +1,5 @@
-use std::ascii;
-use std::str;
-
 use crate::cartridge_type::CartridgeType;
+use crate::utils::buffer_slice_to_string;
 
 // const NINTENDO_LOGO_LOCATION: usize = 0x104;
 // const NINTENDO_LOGO_END: usize = 0x133;
@@ -16,17 +14,6 @@ const ROM_SIZE_LOCATION: usize = 0x148;
 const RAM_SIZE_LOCATION: usize = 0x149;
 
 pub const RAM_BANK_SIZE: usize = 0x8000;
-
-fn buffer_slice_to_string(buffer: &[u8]) -> String {
-    let mut visible = String::new();
-
-    for b in buffer {
-        let part: Vec<u8> = ascii::escape_default(*b).collect();
-        visible.push_str(str::from_utf8(&part).unwrap());
-    }
-
-    visible
-}
 
 #[derive(Debug)]
 pub enum ColorGameboySupport {

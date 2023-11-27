@@ -1,4 +1,6 @@
 use num;
+use std::ascii;
+use std::str;
 
 pub fn u8s_to_u16(x: u8, y: u8) -> u16 {
     ((x as u16) << 8) + (y as u16)
@@ -6,6 +8,17 @@ pub fn u8s_to_u16(x: u8, y: u8) -> u16 {
 
 pub fn u16_to_u8s(value: u16) -> [u8; 2] {
     [(value >> 8) as u8, value as u8]
+}
+
+pub fn buffer_slice_to_string(buffer: &[u8]) -> String {
+    let mut visible = String::new();
+
+    for b in buffer {
+        let part: Vec<u8> = ascii::escape_default(*b).collect();
+        visible.push_str(str::from_utf8(&part).unwrap());
+    }
+
+    visible
 }
 
 pub trait BitWise<T: num::Integer> {

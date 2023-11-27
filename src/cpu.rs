@@ -28,11 +28,11 @@ impl Ops for Cpu {
     fn ccf(&mut self) {
         self.registers
             .toggle_flag(
-                FlagRegisterValue::C,
-                !self.registers.is_flag_set(FlagRegisterValue::C),
+                FlagRegisterValue::Carry,
+                !self.registers.is_flag_set(FlagRegisterValue::Carry),
             )
-            .unset_flag(FlagRegisterValue::N)
-            .unset_flag(FlagRegisterValue::H);
+            .unset_flag(FlagRegisterValue::Negative)
+            .unset_flag(FlagRegisterValue::HalfCarry);
 
         self.program_counter += 1;
     }
@@ -378,9 +378,9 @@ impl Ops for Cpu {
         let result = self.registers.get(register).wrapping_add(1);
 
         self.registers
-            .toggle_flag(FlagRegisterValue::Z, result == 0)
-            .unset_flag(FlagRegisterValue::N)
-            .toggle_flag(FlagRegisterValue::H, result.inc_should_half_carry())
+            .toggle_flag(FlagRegisterValue::Zero, result == 0)
+            .unset_flag(FlagRegisterValue::Negative)
+            .toggle_flag(FlagRegisterValue::HalfCarry, result.inc_should_half_carry())
             .set(register, result);
 
         self.program_counter += 1;
@@ -392,9 +392,9 @@ impl Ops for Cpu {
             .wrapping_add(1);
 
         self.registers
-            .toggle_flag(FlagRegisterValue::Z, result == 0)
-            .unset_flag(FlagRegisterValue::N)
-            .toggle_flag(FlagRegisterValue::H, result.inc_should_half_carry());
+            .toggle_flag(FlagRegisterValue::Zero, result == 0)
+            .unset_flag(FlagRegisterValue::Negative)
+            .toggle_flag(FlagRegisterValue::HalfCarry, result.inc_should_half_carry());
 
         mbc.write(self.registers.get16(register).into(), result);
 
@@ -417,9 +417,9 @@ impl Ops for Cpu {
         let result = self.registers.get(register).wrapping_sub(1);
 
         self.registers
-            .toggle_flag(FlagRegisterValue::Z, result == 0)
-            .set_flag(FlagRegisterValue::N)
-            .toggle_flag(FlagRegisterValue::H, result.dec_should_half_carry())
+            .toggle_flag(FlagRegisterValue::Zero, result == 0)
+            .set_flag(FlagRegisterValue::Negative)
+            .toggle_flag(FlagRegisterValue::HalfCarry, result.dec_should_half_carry())
             .set(register, result);
 
         self.program_counter += 1;
@@ -431,9 +431,9 @@ impl Ops for Cpu {
             .wrapping_sub(1);
 
         self.registers
-            .toggle_flag(FlagRegisterValue::Z, result == 0)
-            .unset_flag(FlagRegisterValue::N)
-            .toggle_flag(FlagRegisterValue::H, result.dec_should_half_carry());
+            .toggle_flag(FlagRegisterValue::Zero, result == 0)
+            .unset_flag(FlagRegisterValue::Negative)
+            .toggle_flag(FlagRegisterValue::HalfCarry, result.dec_should_half_carry());
 
         mbc.write(self.registers.get16(register).into(), result);
 
@@ -465,8 +465,8 @@ impl Ops for Cpu {
         let result = self.registers.get(GeneralRegister::A) ^ 0xFF;
 
         self.registers
-            .set_flag(FlagRegisterValue::N)
-            .set_flag(FlagRegisterValue::H)
+            .set_flag(FlagRegisterValue::Negative)
+            .set_flag(FlagRegisterValue::HalfCarry)
             .set(GeneralRegister::A, result);
 
         self.program_counter += 1;
@@ -477,7 +477,7 @@ impl Ops for Cpu {
 
         self.registers
             .set(GeneralRegister::A, result)
-            .unset_flag(FlagRegisterValue::Z);
+            .unset_flag(FlagRegisterValue::Zero);
 
         self.program_counter += 1;
     }
@@ -487,7 +487,7 @@ impl Ops for Cpu {
 
         self.registers
             .set(GeneralRegister::A, result)
-            .unset_flag(FlagRegisterValue::Z);
+            .unset_flag(FlagRegisterValue::Zero);
 
         self.program_counter += 1;
     }
@@ -497,7 +497,7 @@ impl Ops for Cpu {
 
         self.registers
             .set(GeneralRegister::A, result)
-            .unset_flag(FlagRegisterValue::Z);
+            .unset_flag(FlagRegisterValue::Zero);
 
         self.program_counter += 1;
     }
@@ -507,7 +507,7 @@ impl Ops for Cpu {
 
         self.registers
             .set(GeneralRegister::A, result)
-            .unset_flag(FlagRegisterValue::Z);
+            .unset_flag(FlagRegisterValue::Zero);
 
         self.program_counter += 1;
     }
@@ -571,10 +571,10 @@ impl PrefixOps for Cpu {
         let result = value.rotate_right(1).unset_bit(1 << 7);
 
         self.registers
-            .toggle_flag(FlagRegisterValue::Z, result == 0)
-            .unset_flag(FlagRegisterValue::N)
-            .unset_flag(FlagRegisterValue::H)
-            .toggle_flag(FlagRegisterValue::C, result.is_bit_set(1 << 0))
+            .toggle_flag(FlagRegisterValue::Zero, result == 0)
+            .unset_flag(FlagRegisterValue::Negative)
+            .unset_flag(FlagRegisterValue::HalfCarry)
+            .toggle_flag(FlagRegisterValue::Carry, result.is_bit_set(1 << 0))
             .set(register, result);
 
         self.program_counter += 2;
@@ -617,7 +617,7 @@ impl Cpu {
     }
 
     fn carry_val(&self) -> u8 {
-        self.registers.is_flag_set(FlagRegisterValue::C) as u8
+        self.registers.is_flag_set(FlagRegisterValue::Carry) as u8
     }
 
     /// Represents an unused CPU instruction. If this instruction is called
@@ -637,10 +637,10 @@ impl Cpu {
 
         self.registers
             .set(GeneralRegister::A, result)
-            .toggle_flag(FlagRegisterValue::Z, result == 0)
-            .unset_flag(FlagRegisterValue::N)
-            .toggle_flag(FlagRegisterValue::H, a_value.add_should_half_carry(value))
-            .toggle_flag(FlagRegisterValue::C, a_value.add_should_carry(value));
+            .toggle_flag(FlagRegisterValue::Zero, result == 0)
+            .unset_flag(FlagRegisterValue::Negative)
+            .toggle_flag(FlagRegisterValue::HalfCarry, a_value.add_should_half_carry(value))
+            .toggle_flag(FlagRegisterValue::Carry, a_value.add_should_carry(value));
     }
 
     fn adc_inner(&mut self, value: u8) {
@@ -653,9 +653,9 @@ impl Cpu {
 
         self.registers
             .set16(CombinedRegister::HL, result)
-            .unset_flag(FlagRegisterValue::N)
-            .toggle_flag(FlagRegisterValue::H, hl_val.add_should_half_carry(value))
-            .toggle_flag(FlagRegisterValue::C, hl_val.add_should_carry(value));
+            .unset_flag(FlagRegisterValue::Negative)
+            .toggle_flag(FlagRegisterValue::HalfCarry, hl_val.add_should_half_carry(value))
+            .toggle_flag(FlagRegisterValue::Carry, hl_val.add_should_carry(value));
     }
 
     fn sub_inner(&mut self, value: u8) {
@@ -663,10 +663,10 @@ impl Cpu {
         let result = a_val.wrapping_sub(value);
 
         self.registers
-            .toggle_flag(FlagRegisterValue::Z, result == 0)
-            .set_flag(FlagRegisterValue::N)
-            .toggle_flag(FlagRegisterValue::H, a_val.sub_should_half_carry(value))
-            .toggle_flag(FlagRegisterValue::C, a_val.sub_should_carry(value))
+            .toggle_flag(FlagRegisterValue::Zero, result == 0)
+            .set_flag(FlagRegisterValue::Negative)
+            .toggle_flag(FlagRegisterValue::HalfCarry, a_val.sub_should_half_carry(value))
+            .toggle_flag(FlagRegisterValue::Carry, a_val.sub_should_carry(value))
             .set(GeneralRegister::A, result);
     }
 
@@ -679,10 +679,10 @@ impl Cpu {
         let result = a_val & value;
 
         self.registers
-            .toggle_flag(FlagRegisterValue::Z, result == 0)
-            .unset_flag(FlagRegisterValue::N)
-            .set_flag(FlagRegisterValue::H)
-            .unset_flag(FlagRegisterValue::C);
+            .toggle_flag(FlagRegisterValue::Zero, result == 0)
+            .unset_flag(FlagRegisterValue::Negative)
+            .set_flag(FlagRegisterValue::HalfCarry)
+            .unset_flag(FlagRegisterValue::Carry);
     }
 
     fn xor_inner(&mut self, value: u8) {
@@ -691,10 +691,10 @@ impl Cpu {
 
         self.registers
             .set(GeneralRegister::A, result)
-            .toggle_flag(FlagRegisterValue::Z, result == 0)
-            .unset_flag(FlagRegisterValue::N)
-            .unset_flag(FlagRegisterValue::H)
-            .unset_flag(FlagRegisterValue::C);
+            .toggle_flag(FlagRegisterValue::Zero, result == 0)
+            .unset_flag(FlagRegisterValue::Negative)
+            .unset_flag(FlagRegisterValue::HalfCarry)
+            .unset_flag(FlagRegisterValue::Carry);
     }
 
     fn or_inner(&mut self, value: u8) {
@@ -703,27 +703,27 @@ impl Cpu {
 
         self.registers
             .set(GeneralRegister::A, result)
-            .toggle_flag(FlagRegisterValue::Z, result == 0)
-            .unset_flag(FlagRegisterValue::N)
-            .unset_flag(FlagRegisterValue::H)
-            .unset_flag(FlagRegisterValue::C);
+            .toggle_flag(FlagRegisterValue::Zero, result == 0)
+            .unset_flag(FlagRegisterValue::Negative)
+            .unset_flag(FlagRegisterValue::HalfCarry)
+            .unset_flag(FlagRegisterValue::Carry);
     }
 
     fn cp_inner(&mut self, value: u8) {
         let a_val = self.registers.get(GeneralRegister::A);
 
         self.registers
-            .toggle_flag(FlagRegisterValue::Z, a_val.wrapping_sub(value) == 0)
-            .set_flag(FlagRegisterValue::N)
-            .toggle_flag(FlagRegisterValue::H, a_val.sub_should_half_carry(value))
-            .toggle_flag(FlagRegisterValue::C, a_val.sub_should_carry(value));
+            .toggle_flag(FlagRegisterValue::Zero, a_val.wrapping_sub(value) == 0)
+            .set_flag(FlagRegisterValue::Negative)
+            .toggle_flag(FlagRegisterValue::HalfCarry, a_val.sub_should_half_carry(value))
+            .toggle_flag(FlagRegisterValue::Carry, a_val.sub_should_carry(value));
     }
 
     fn bit_inner(&mut self, bit: u8, value: u8) {
         self.registers
-            .toggle_flag(FlagRegisterValue::Z, !value.is_bit_set(1 << bit))
-            .unset_flag(FlagRegisterValue::N)
-            .set_flag(FlagRegisterValue::H);
+            .toggle_flag(FlagRegisterValue::Zero, !value.is_bit_set(1 << bit))
+            .unset_flag(FlagRegisterValue::Negative)
+            .set_flag(FlagRegisterValue::HalfCarry);
     }
 
     fn call(&mut self, mbc: &mut MBC) {
@@ -805,10 +805,10 @@ impl Cpu {
         let result = value.rotate_left(1) | carry;
 
         self.registers
-            .toggle_flag(FlagRegisterValue::Z, result == 0)
-            .unset_flag(FlagRegisterValue::N)
-            .unset_flag(FlagRegisterValue::H)
-            .toggle_flag(FlagRegisterValue::C, will_carry);
+            .toggle_flag(FlagRegisterValue::Zero, result == 0)
+            .unset_flag(FlagRegisterValue::Negative)
+            .unset_flag(FlagRegisterValue::HalfCarry)
+            .toggle_flag(FlagRegisterValue::Carry, will_carry);
 
         result
     }
@@ -819,10 +819,10 @@ impl Cpu {
         let result = value.rotate_left(1) | truncate_bit;
 
         self.registers
-            .toggle_flag(FlagRegisterValue::Z, result == 0)
-            .unset_flag(FlagRegisterValue::N)
-            .unset_flag(FlagRegisterValue::H)
-            .toggle_flag(FlagRegisterValue::C, will_carry);
+            .toggle_flag(FlagRegisterValue::Zero, result == 0)
+            .unset_flag(FlagRegisterValue::Negative)
+            .unset_flag(FlagRegisterValue::HalfCarry)
+            .toggle_flag(FlagRegisterValue::Carry, will_carry);
 
         result
     }
@@ -833,10 +833,10 @@ impl Cpu {
         let result = value.rotate_right(1) | carry.rotate_left(7);
 
         self.registers
-            .toggle_flag(FlagRegisterValue::Z, result == 0)
-            .unset_flag(FlagRegisterValue::N)
-            .unset_flag(FlagRegisterValue::H)
-            .toggle_flag(FlagRegisterValue::C, will_carry);
+            .toggle_flag(FlagRegisterValue::Zero, result == 0)
+            .unset_flag(FlagRegisterValue::Negative)
+            .unset_flag(FlagRegisterValue::HalfCarry)
+            .toggle_flag(FlagRegisterValue::Carry, will_carry);
 
         result
     }
@@ -847,10 +847,10 @@ impl Cpu {
         let result = value.rotate_right(1) | truncate_bit.rotate_left(7);
 
         self.registers
-            .toggle_flag(FlagRegisterValue::Z, result == 0)
-            .unset_flag(FlagRegisterValue::N)
-            .unset_flag(FlagRegisterValue::H)
-            .toggle_flag(FlagRegisterValue::C, will_carry);
+            .toggle_flag(FlagRegisterValue::Zero, result == 0)
+            .unset_flag(FlagRegisterValue::Negative)
+            .unset_flag(FlagRegisterValue::HalfCarry)
+            .toggle_flag(FlagRegisterValue::Carry, will_carry);
 
         result
     }
@@ -1108,7 +1108,7 @@ impl Cpu {
             0x1E => self.ld_r_d8(mbc, GeneralRegister::E),
             0x1F => self.rra(),
 
-            0x20 => self.jrf_not(mbc, FlagRegisterValue::Z),
+            0x20 => self.jrf_not(mbc, FlagRegisterValue::Zero),
             0x21 => self.ld_rr_d16(mbc, CombinedRegister::HL),
             0x22 => self.ldi_mem_rr_r(mbc, CombinedRegister::HL, GeneralRegister::A),
             0x23 => self.inc_rr(CombinedRegister::HL),
@@ -1116,7 +1116,7 @@ impl Cpu {
             0x25 => self.dec_r(GeneralRegister::H),
             0x26 => self.ld_r_d8(mbc, GeneralRegister::H),
             0x27 => self.not_implemented("DAA"),
-            0x28 => self.jrf(mbc, FlagRegisterValue::Z),
+            0x28 => self.jrf(mbc, FlagRegisterValue::Zero),
             0x29 => self.add_rr(CombinedRegister::HL),
             0x2A => self.ldi_r_mem_rr(mbc, GeneralRegister::A, CombinedRegister::HL),
             0x2B => self.dec_rr(CombinedRegister::HL),
@@ -1125,7 +1125,7 @@ impl Cpu {
             0x2E => self.ld_r_d8(mbc, GeneralRegister::L),
             0x2F => self.cpl(),
 
-            0x30 => self.jrf_not(mbc, FlagRegisterValue::C),
+            0x30 => self.jrf_not(mbc, FlagRegisterValue::Carry),
             0x31 => self.ld_sp_d16(mbc),
             0x32 => self.ldd_mem_rr_r(mbc, CombinedRegister::HL, GeneralRegister::A),
             0x33 => self.inc_sp(),
@@ -1133,7 +1133,7 @@ impl Cpu {
             0x35 => self.inc_mem_rr(mbc, CombinedRegister::HL),
             0x36 => self.ld_mem_rr_d8(mbc, CombinedRegister::HL),
             0x37 => self.not_implemented("SCF"),
-            0x38 => self.jrf(mbc, FlagRegisterValue::C),
+            0x38 => self.jrf(mbc, FlagRegisterValue::Carry),
             0x39 => self.add_sp(),
             0x3A => self.ldd_r_mem_rr(mbc, GeneralRegister::A, CombinedRegister::HL),
             0x3B => self.dec_sp(),
@@ -1278,34 +1278,34 @@ impl Cpu {
             0xBE => self.cp_mem_rr(mbc, CombinedRegister::HL),
             0xBF => self.cp_r(GeneralRegister::A),
 
-            0xC0 => self.ret_not(mbc, FlagRegisterValue::Z),
+            0xC0 => self.ret_not(mbc, FlagRegisterValue::Zero),
             0xC1 => self.pop_rr(mbc, CombinedRegister::BC),
-            0xC2 => self.jp_not(mbc, Some(FlagRegisterValue::Z)),
+            0xC2 => self.jp_not(mbc, Some(FlagRegisterValue::Zero)),
             0xC3 => self.jp(mbc, None),
             0xC4 => self.not_implemented("CALL NZ, u16"),
             0xC5 => self.push_rr(mbc, CombinedRegister::BC),
             0xC6 => self.add_d8(mbc),
             0xC7 => self.not_implemented("RST 00h"),
-            0xC8 => self.ret_if(mbc, FlagRegisterValue::Z),
+            0xC8 => self.ret_if(mbc, FlagRegisterValue::Zero),
             0xC9 => self.ret(mbc),
-            0xCA => self.jp(mbc, Some(FlagRegisterValue::Z)),
+            0xCA => self.jp(mbc, Some(FlagRegisterValue::Zero)),
             0xCB => self.prefix(mbc),
             0xCC => self.not_implemented("CALL Z, u16"),
             0xCD => self.call(mbc),
             0xCE => self.adc_d8(mbc),
             0xCF => self.not_implemented("RST 08h"),
 
-            0xD0 => self.ret_not(mbc, FlagRegisterValue::C),
+            0xD0 => self.ret_not(mbc, FlagRegisterValue::Carry),
             0xD1 => self.pop_rr(mbc, CombinedRegister::DE),
-            0xD2 => self.jp_not(mbc, Some(FlagRegisterValue::C)),
+            0xD2 => self.jp_not(mbc, Some(FlagRegisterValue::Carry)),
             0xD3 => self.nothing(),
             0xD4 => self.not_implemented("CALL NC, u16"),
             0xD5 => self.push_rr(mbc, CombinedRegister::DE),
             0xD6 => self.sub_d8(mbc),
             0xD7 => self.not_implemented("RST 10h"),
-            0xD8 => self.ret_if(mbc, FlagRegisterValue::C),
+            0xD8 => self.ret_if(mbc, FlagRegisterValue::Carry),
             0xD9 => self.reti(mbc),
-            0xDA => self.jp(mbc, Some(FlagRegisterValue::C)),
+            0xDA => self.jp(mbc, Some(FlagRegisterValue::Carry)),
             0xDB => self.nothing(),
             0xDC => self.not_implemented("CALL C, u16"),
             0xDD => self.nothing(),

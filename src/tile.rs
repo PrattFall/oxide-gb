@@ -90,7 +90,7 @@ impl IndexMut<&'_ usize> for Tile {
 impl Tile {
     // TODO: Actually handle i8 when lcdc.4 is active
     // https://gbdev.io/pandocs/Tile_Data.html
-    fn from_ram(lcdc: LCDC, ram: &MBC, tile_index: usize) -> Tile {
+    pub fn from_ram(lcdc: LCDC, ram: &MBC, tile_index: usize) -> Tile {
         let prefix = *lcdc.bg_and_window_tile_data_area().start() as usize;
 
         let vram_start = prefix + tile_index * TILE_SIZE_BYTES;

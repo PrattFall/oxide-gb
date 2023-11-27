@@ -1,6 +1,7 @@
 #[macro_use]
 extern crate glium;
 
+mod banked_memory;
 mod cartridge;
 mod cartridge_header;
 mod cartridge_type;
@@ -12,8 +13,9 @@ mod mbc;
 mod ops;
 mod pixel;
 mod prefix_ops;
-mod render;
+mod render_opengl;
 mod tile;
+mod tile_dictionary;
 mod utils;
 mod video;
 
@@ -22,7 +24,7 @@ use std::fs::File;
 use std::io;
 use std::path::Path;
 
-use crate::render::render;
+use crate::render_opengl::render;
 use crate::video::Video;
 
 fn read_cartridge() -> impl AsRef<Path> {

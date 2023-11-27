@@ -1,12 +1,16 @@
 use crate::lcdc::LCDC;
 use crate::mbc::MBC;
 use crate::pixel::Pixel;
-use crate::tile::{tile_from_ram, Tile};
+use crate::tile::Tile;
+use crate::tile_dictionary::TileDictionary;
 
 pub type Frame = Vec<Vec<Pixel>>;
 
 pub const SCREEN_HEIGHT: u8 = 144;
 pub const SCREEN_WIDTH: u8 = 160;
+
+// The maximum rendered background size. Larger than the height and width because
+// there is overdraw.
 pub const BACKGROUND_SIZE: usize = 256;
 
 pub struct VideoBackground {
@@ -18,26 +22,6 @@ impl Default for VideoBackground {
         VideoBackground {
             pixels: [[Pixel::Lightest; BACKGROUND_SIZE]; BACKGROUND_SIZE],
         }
-    }
-}
-
-pub struct TileDictionary {
-    tiles: [Tile; 256]
-}
-
-impl Default for TileDictionary {
-    fn default() -> Self {
-        let tile: Tile = Tile::default();
-
-        TileDictionary {
-            tiles: [tile; 256]
-        }
-    }
-}
-
-impl TileDictionary {
-    fn set(&mut self, index: usize, value: Tile) {
-        self.tiles[index] = value;
     }
 }
 
@@ -58,7 +42,7 @@ impl Video {
 
     pub fn collect_tiles(&mut self, lcdc: LCDC, ram: &MBC) {
         for i in 0..256 {
-            self.tiles.set(i, tile_from_ram(lcdc, &ram, i));
+            self.tiles.set(i,Tile::from_ram(lcdc, &ram, i));
         }
     }
 

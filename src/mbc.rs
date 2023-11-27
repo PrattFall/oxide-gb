@@ -1,34 +1,8 @@
 use crate::cartridge::Cartridge;
-use crate::cartridge_header::RAM_BANK_SIZE;
 use crate::utils::u8s_to_u16;
+use crate::banked_memory::BankedMemory;
 
-pub const ROM_BANK_SIZE: usize = 16000;
-
-pub struct BankedMemory {
-    pub active_bank: usize,
-    pub banks: Vec<Vec<u8>>,
-}
-
-impl BankedMemory {
-    pub fn new(active_bank: usize, bank_size: usize, bank_count: usize) -> Self {
-        BankedMemory {
-            active_bank,
-            banks: vec![vec![0; bank_size]; bank_count],
-        }
-    }
-
-    pub fn value_at(&self, location: usize) -> u8 {
-        self.banks[self.active_bank][location]
-    }
-
-    pub fn value_in_bank(&self, bank: usize, location: usize) -> u8 {
-        self.banks[bank][location]
-    }
-
-    pub fn set_at(&mut self, location: usize, value: u8) {
-        self.banks[self.active_bank][location] = value;
-    }
-}
+pub const RAM_ENABLE_VALUE: u8 = 0xa;
 
 pub struct MBC {
     banking_mode: u8, // Only need 2 bits
@@ -48,18 +22,8 @@ impl From<Cartridge> for MBC {
         MBC {
             banking_mode: 0,
             ram_enabled: false,
-            ram: match cartridge.header.ram_size {
-                Some(ram_size) => BankedMemory::new(0, RAM_BANK_SIZE, ram_size.into()),
-                None => BankedMemory::new(0, 0x8000, 1),
-            },
-            rom: BankedMemory {
-                active_bank: 1,
-                banks: cartridge
-                    .data
-                    .chunks(ROM_BANK_SIZE)
-                    .map(|x| x.to_vec())
-                    .collect(),
-            },
+            ram: BankedMemory::of_size(cartridge.header.ram_size),
+            rom: BankedMemory::from(cartridge),
             video_ram: vec![0x0000; 0xa000 - 0x8000],
             work_ram: vec![0x0000; 0xe000 - 0xc000],
             sprite_attribute_table: vec![0x0000; 0xfea0 - 0xfe00],
@@ -87,7 +51,7 @@ impl MBC {
         match location {
             // Ram is enabled when the lowest 4 bits written to this range
             // are equal to 0x00a0
-            0x0000..=0x1fff => self.ram_enabled = (value & 0b0000_1111) == 0x00a0,
+            0x0000..=0x1fff => self.ram_enabled = (value & 0b0000_1111) == RAM_ENABLE_VALUE,
 
             // The selected bank number is indicated by the lowest 5 bits
             // TODO: Mask bank number based on full size of rom
@@ -134,5 +98,37 @@ impl MBC {
 
     pub fn read_slice(&self, start: usize, end: usize) -> Vec<u8> {
         (start..=end).map(|location| self.read(location)).collect()
+    }
+}
+
+mod tests {
+    use crate::banked_memory;
+
+    use super::{MBC, RAM_ENABLE_VALUE};
+
+    fn get_mock_mbc() -> MBC {
+        MBC {
+            banking_mode: 0,
+            ram_enabled: false,
+            ram: banked_memory::BankedMemory::of_size(Some(0)),
+            rom: banked_memory::BankedMemory::of_size(Some(0)),
+            video_ram: vec![0x0000; 0xa000 - 0x8000],
+            work_ram: vec![0x0000; 0xe000 - 0xc000],
+            sprite_attribute_table: vec![0x0000; 0xfea0 - 0xfe00],
+            io_registers: vec![0x0000; 0xff80 - 0xff00],
+            high_ram: vec![0x0000; 0xffff - 0xff80],
+            interrupt_enable_register: 0x0000,
+        }
+    }
+
+    #[test]
+    fn test_write_ram_enable() {
+        let mut value = get_mock_mbc();
+
+        assert!(!value.ram_enabled);
+
+        value.write(0x0000, RAM_ENABLE_VALUE);
+
+        assert!(value.ram_enabled);
     }
 }

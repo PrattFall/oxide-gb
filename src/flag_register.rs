@@ -1,9 +1,9 @@
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum FlagRegisterValue {
-    C = 1 << 4,
-    H = 1 << 5,
-    N = 1 << 6,
-    Z = 1 << 7,
+    Carry = 1 << 4,
+    HalfCarry = 1 << 5,
+    Negative = 1 << 6,
+    Zero = 1 << 7,
 }
 
 impl Into<u8> for FlagRegisterValue {
