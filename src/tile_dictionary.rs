@@ -1,7 +1,9 @@
 use crate::tile::Tile;
 
+const MAX_TILES: usize = 384;
+
 pub struct TileDictionary {
-    tiles: [Tile; 256]
+    tiles: [Tile; MAX_TILES]
 }
 
 impl Default for TileDictionary {
@@ -9,7 +11,7 @@ impl Default for TileDictionary {
         let tile: Tile = Tile::default();
 
         TileDictionary {
-            tiles: [tile; 256]
+            tiles: [tile; MAX_TILES]
         }
     }
 }
