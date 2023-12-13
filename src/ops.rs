@@ -11,8 +11,7 @@ pub trait Ops {
     fn ei(&mut self);
 
     fn ret(&mut self, mbc: &MBC);
-    fn ret_if(&mut self, mbc: &MBC, flag: FlagRegisterValue);
-    fn ret_not(&mut self, mbc: &MBC, flag: FlagRegisterValue);
+    fn ret_f(&mut self, mbc: &MBC, flag: FlagRegisterValue, truthy: bool);
     fn reti(&mut self, mbc: &MBC);
 
     fn ld_r_r(&mut self, to: GeneralRegister, from: GeneralRegister);
@@ -90,6 +89,13 @@ pub trait Ops {
 
     fn push_rr(&mut self, mbc: &mut MBC, register: CombinedRegister);
     fn pop_rr(&mut self, mbc: &MBC, register: CombinedRegister);
+
+    fn jp(&mut self, mbc: &MBC, flag: Option<FlagRegisterValue>, truthy: bool);
+    fn jr(&mut self, mbc: &MBC, flag: Option<FlagRegisterValue>, truthy: bool);
+
+    fn call_f_a16(&mut self, mbc: &mut MBC, flag: FlagRegisterValue, truthy: bool);
+
+    fn scf(&mut self);
 
     fn cpl(&mut self);
     fn rlca(&mut self);

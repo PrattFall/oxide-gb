@@ -101,7 +101,7 @@ impl Registers {
     pub fn set_flag(&mut self, flag: FlagRegisterValue) -> &mut Self {
         self.set(
             GeneralRegister::F,
-            self.get(GeneralRegister::F).set_bit(flag as u8),
+            self.get(GeneralRegister::F).set_bit(flag.into()),
         );
 
         self
@@ -110,7 +110,7 @@ impl Registers {
     pub fn unset_flag(&mut self, flag: FlagRegisterValue) -> &mut Self {
         self.set(
             GeneralRegister::F,
-            self.get(GeneralRegister::F).unset_bit(flag as u8),
+            self.get(GeneralRegister::F).unset_bit(flag.into()),
         );
 
         self
@@ -127,7 +127,7 @@ impl Registers {
     }
 
     pub fn is_flag_set(&self, flag: FlagRegisterValue) -> bool {
-        self.get(GeneralRegister::F).is_bit_set(flag as u8)
+        self.get(GeneralRegister::F).is_bit_set(flag.into())
     }
 
     pub fn increment16(&mut self, register: CombinedRegister) -> u16 {
